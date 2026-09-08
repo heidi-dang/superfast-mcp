@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>superfast-mcp Terminal</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="shell" class="shell" data-state="connecting">
+    <header class="bar">
+      <div class="left">
+        <span class="dot" aria-hidden="true"></span>
+        <span id="machine" class="machine">superfast-mcp</span>
+      </div>
+      <div id="status" class="status" data-state="connecting">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>CONNECTING</span>
+      </div>
+    </header>
+    <div id="path" class="path" title="">Waiting for terminal session…</div>
+    <pre id="output" class="output" aria-live="polite" aria-relevant="additions"></pre>
+    <footer class="footer">
+      <span id="footer-shell">shell</span>
+      <span id="footer-hint">follow-tail · live</span>
+    </footer>
+  </div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
