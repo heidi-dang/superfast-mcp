@@ -1,0 +1,21 @@
+# Example Caddyfile for superfast-mcp on an existing DNS domain.
+# Replace mcp.example.com with your domain and point the A/AAAA record at this host.
+
+mcp.example.com {
+	encode zstd gzip
+
+	# MCP Streamable HTTP endpoint (ChatGPT / Grok custom connector)
+	handle /mcp* {
+		reverse_proxy 127.0.0.1:8787 {
+			flush_interval -1
+		}
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	handle {
+		respond "superfast-mcp — use /mcp" 200
+	}
+}
