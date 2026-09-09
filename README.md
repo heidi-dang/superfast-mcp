@@ -54,21 +54,46 @@ Example local MCP client configuration:
 
 ## Remote HTTP
 
-Remote HTTP fails closed unless authentication is configured or unauthenticated mode is explicitly requested. When `SUPERFAST_PUBLIC_URL` and `SUPERFAST_AUTH_TOKEN` are both set, the server automatically exposes MCP-compatible OAuth 2.1 discovery, Dynamic Client Registration, PKCE authorization-code flow, and refresh tokens. The static bearer token remains available as a break-glass credential.
+Remote HTTP fails closed unless authentication is configured or unauthenticated mode is explicitly requested. The release supports two authentication modes during the Cloudflare migration.
+
+### Cloudflare managed mode — recommended for production
+
+Cloudflare Access owns the public OAuth flow and the externally observed `/mcp` `WWW-Authenticate` challenge. The Go origin does not trust the Cloudflare header by itself: it validates `Cf-Access-Jwt-Assertion` with the configured Access issuer, application audience, owner identity, JWKS, resource, scope, signature, and JWT time claims. The existing static bearer remains available as an origin/break-glass path, and native OAuth is retained temporarily for rollback.
+
+Example origin configuration, using placeholders only:
 
 ```bash
 export SUPERFAST_HTTP=127.0.0.1:8787
 export SUPERFAST_HTTP_ONLY=true
 export SUPERFAST_PUBLIC_URL=https://mcp.example.com
 export SUPERFAST_ROOTS=/path/to/code
-export SUPERFAST_AUTH_TOKEN="$(openssl rand -hex 32)"
+export SUPERFAST_AUTH_TOKEN_FILE=/run/secrets/superfast-mcp-token
+export SUPERFAST_CF_ACCESS_ISSUER=https://your-team.cloudflareaccess.com
+export SUPERFAST_CF_ACCESS_AUDIENCE=replace-with-access-application-aud
+export SUPERFAST_CF_ACCESS_ALLOWED_EMAIL=owner@example.com
+export SUPERFAST_CF_ACCESS_REQUIRED_SCOPES=mcp
 
 ./superfast-mcp
 ```
 
-Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. OAuth-capable MCP clients discover the protected resource and authorization server from the standard `/.well-known/` endpoints, register as public clients, and use PKCE-S256. The authorization page requires the server owner's authorization password before issuing a code. Set `SUPERFAST_OAUTH_OWNER_PASSWORD` to choose that password explicitly; when unset, the server derives it from the master bearer token for backward compatibility. Access tokens are resource-bound and expire after one hour; successful authorization-code exchanges also issue a refresh token for persistent clients.
+`SUPERFAST_CF_ACCESS_JWKS_URL` is optional and defaults to `<issuer>/cdn-cgi/access/certs`. Keep all real Access identifiers, identities, and credentials outside source control.
 
-Static clients can still send `Authorization: Bearer <token>` directly. For production, keep the master token outside shell history and source control. `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` can load it from a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
+Qualify the public Cloudflare Managed OAuth contract without printing credentials:
+
+```bash
+SUPERFAST_EDGE_MCP_URL=https://superfast.heidiai.com.au/mcp \
+  go run ./cmd/superfast-edgecheck
+```
+
+Set `SUPERFAST_EDGE_ACCESS_TOKEN` only when performing the authenticated phase; the command uses it solely as a Bearer header and never prints it. A successful authenticated check requires exactly the eight tools documented above.
+
+### Native rollback mode
+
+When `SUPERFAST_PUBLIC_URL` and `SUPERFAST_AUTH_TOKEN` are both set, the Go server still exposes its existing RFC 9728 protected-resource metadata, Dynamic Client Registration, PKCE-S256 authorization-code flow, token endpoint, and refresh tokens. This path is retained temporarily for rollback and origin qualification; it is **not** the recommended ChatGPT production OAuth path after Cloudflare Access cutover.
+
+The native authorization page requires the server owner's authorization password before issuing a code. Set `SUPERFAST_OAUTH_OWNER_PASSWORD` explicitly or allow the server to derive a separate owner password from the master bearer token for backward compatibility.
+
+Static clients can still send `Authorization: Bearer <token>` directly. Keep the master token outside shell history and source control; prefer `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` with a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
 
 `--allow-unauthenticated-http` / `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP=true` is an explicit escape hatch for a separately protected trusted network or proxy. Do not use it on a directly reachable host.
 
@@ -85,6 +110,11 @@ Supported variables:
 - `SUPERFAST_AUTH_TOKEN`
 - `SUPERFAST_AUTH_TOKEN_FILE`
 - `SUPERFAST_OAUTH_OWNER_PASSWORD`
+- `SUPERFAST_CF_ACCESS_ISSUER`
+- `SUPERFAST_CF_ACCESS_AUDIENCE`
+- `SUPERFAST_CF_ACCESS_ALLOWED_EMAIL`
+- `SUPERFAST_CF_ACCESS_JWKS_URL`
+- `SUPERFAST_CF_ACCESS_REQUIRED_SCOPES`
 - `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP`
 
 See `deploy/env.example` for a production-oriented baseline.
@@ -93,9 +123,13 @@ See `deploy/env.example` for a production-oriented baseline.
 
 ```text
 superfast-mcp/
-├── cmd/superfast-mcp/
+├── cmd/
+│   ├── superfast-mcp/
+│   └── superfast-edgecheck/
 ├── internal/
+│   ├── access/
 │   ├── config/
+│   ├── edgecheck/
 │   ├── fs/
 │   ├── git/
 │   ├── limitio/

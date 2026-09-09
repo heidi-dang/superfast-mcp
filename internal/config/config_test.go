@@ -10,6 +10,16 @@ func envMap(values map[string]string) func(string) string {
 	return func(key string) string { return values[key] }
 }
 
+func TestCurrentVersion(t *testing.T) {
+	cfg, err := ParseArgs([]string{"--allow-unauthenticated-http"}, envMap(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != "0.2.0" {
+		t.Fatalf("version=%q, want 0.2.0", cfg.Version)
+	}
+}
+
 func TestParseArgsDefaultsHTTPToLoopback(t *testing.T) {
 	cfg, err := ParseArgs([]string{"--allow-unauthenticated-http"}, envMap(nil))
 	if err != nil {
@@ -96,11 +106,11 @@ func TestParseArgsCloudflareAccessNilWhenUnset(t *testing.T) {
 
 func TestParseArgsCloudflareAccessComplete(t *testing.T) {
 	cfg, err := ParseArgs(nil, envMap(map[string]string{
-		"SUPERFAST_PUBLIC_URL":             "https://mcp.example.com/",
+		"SUPERFAST_PUBLIC_URL":                 "https://mcp.example.com/",
 		"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP": "true",
-		"SUPERFAST_CF_ACCESS_ISSUER":        "https://team.cloudflareaccess.com/",
-		"SUPERFAST_CF_ACCESS_AUDIENCE":      "test-aud",
-		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL": "admin@example.com",
+		"SUPERFAST_CF_ACCESS_ISSUER":           "https://team.cloudflareaccess.com/",
+		"SUPERFAST_CF_ACCESS_AUDIENCE":         "test-aud",
+		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":    "admin@example.com",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -130,13 +140,13 @@ func TestParseArgsCloudflareAccessComplete(t *testing.T) {
 
 func TestParseArgsCloudflareAccessCustomJWKSAndScopes(t *testing.T) {
 	cfg, err := ParseArgs(nil, envMap(map[string]string{
-		"SUPERFAST_PUBLIC_URL":              "https://mcp.example.com",
-		"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP":  "true",
-		"SUPERFAST_CF_ACCESS_ISSUER":         "https://team.cloudflareaccess.com",
-		"SUPERFAST_CF_ACCESS_AUDIENCE":       "test-aud",
-		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":  "admin@example.com",
-		"SUPERFAST_CF_ACCESS_JWKS_URL":       "https://custom.example.com/certs",
-		"SUPERFAST_CF_ACCESS_REQUIRED_SCOPES": "mcp, read, write",
+		"SUPERFAST_PUBLIC_URL":                 "https://mcp.example.com",
+		"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP": "true",
+		"SUPERFAST_CF_ACCESS_ISSUER":           "https://team.cloudflareaccess.com",
+		"SUPERFAST_CF_ACCESS_AUDIENCE":         "test-aud",
+		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":    "admin@example.com",
+		"SUPERFAST_CF_ACCESS_JWKS_URL":         "https://custom.example.com/certs",
+		"SUPERFAST_CF_ACCESS_REQUIRED_SCOPES":  "mcp, read, write",
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -216,11 +226,11 @@ func TestParseArgsCloudflareAccessPartialRejection(t *testing.T) {
 func TestParseArgsCloudflareAccessURLValidation(t *testing.T) {
 	validEnv := func() map[string]string {
 		return map[string]string{
-			"SUPERFAST_PUBLIC_URL":             "https://mcp.example.com",
+			"SUPERFAST_PUBLIC_URL":                 "https://mcp.example.com",
 			"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP": "true",
-			"SUPERFAST_CF_ACCESS_ISSUER":        "https://team.cloudflareaccess.com",
-			"SUPERFAST_CF_ACCESS_AUDIENCE":      "test-aud",
-			"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL": "admin@example.com",
+			"SUPERFAST_CF_ACCESS_ISSUER":           "https://team.cloudflareaccess.com",
+			"SUPERFAST_CF_ACCESS_AUDIENCE":         "test-aud",
+			"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":    "admin@example.com",
 		}
 	}
 
@@ -251,11 +261,11 @@ func TestParseArgsCloudflareAccessURLValidation(t *testing.T) {
 func TestParseArgsCloudflareAccessRejectsEmptyScopes(t *testing.T) {
 	validEnv := func() map[string]string {
 		return map[string]string{
-			"SUPERFAST_PUBLIC_URL":             "https://mcp.example.com",
+			"SUPERFAST_PUBLIC_URL":                 "https://mcp.example.com",
 			"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP": "true",
-			"SUPERFAST_CF_ACCESS_ISSUER":        "https://team.cloudflareaccess.com",
-			"SUPERFAST_CF_ACCESS_AUDIENCE":      "test-aud",
-			"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL": "admin@example.com",
+			"SUPERFAST_CF_ACCESS_ISSUER":           "https://team.cloudflareaccess.com",
+			"SUPERFAST_CF_ACCESS_AUDIENCE":         "test-aud",
+			"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":    "admin@example.com",
 		}
 	}
 
