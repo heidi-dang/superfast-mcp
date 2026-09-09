@@ -13,6 +13,51 @@ import (
 	"testing"
 )
 
+func TestHTTPHandlerOAuthAuthorizationPageAllowsExplicitIssuerFormAction(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicURL = "https://superfast.example.com"
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registration := `{"redirect_uris":["https://chatgpt.example/callback"],"client_name":"ChatGPT","grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web"}`
+	registerReq := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(registration))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201; body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	var registered struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registered); err != nil {
+		t.Fatal(err)
+	}
+
+	challengeBytes := sha256.Sum256([]byte(strings.Repeat("v", 64)))
+	authorizeQuery := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registered.ClientID},
+		"redirect_uri":          {"https://chatgpt.example/callback"},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challengeBytes[:])},
+		"code_challenge_method": {"S256"},
+		"resource":              {"https://superfast.example.com/mcp"},
+		"scope":                 {"mcp"},
+	}
+	authorizeReq := httptest.NewRequest(http.MethodGet, "/authorize?"+authorizeQuery.Encode(), nil)
+	authorizeRec := httptest.NewRecorder()
+	handler.ServeHTTP(authorizeRec, authorizeReq)
+	if authorizeRec.Code != http.StatusOK {
+		t.Fatalf("authorization page status = %d, want 200", authorizeRec.Code)
+	}
+	csp := authorizeRec.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self' https://superfast.example.com") {
+		t.Fatalf("CSP form-action does not explicitly allow issuer: %q", csp)
+	}
+}
+
 func TestHTTPHandlerUsesConfiguredOAuthOwnerPassword(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.PublicURL = "https://superfast.example.com"
