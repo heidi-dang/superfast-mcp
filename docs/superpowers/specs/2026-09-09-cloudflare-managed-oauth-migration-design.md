@@ -49,7 +49,8 @@ Cloudflare Access
   -> injects signed Cf-Access-Jwt-Assertion
   -> forwards request to origin
 Go origin
-  -> validates JWT signature, issuer, audience, resource, identity and scope
+  -> validates JWT signature, issuer, audience, owner identity and JWT time claims
+  -> applies resource/custom-scope restrictions only when those claims are intentionally used
   -> serves MCP server/discover, tools/list and tools/call
 ```
 
@@ -88,7 +89,7 @@ Configuration fields:
 - Access audience/application AUD
 - MCP resource URL
 - allowed owner email or equivalent subject policy
-- required scopes, initially `mcp`
+- optional required scopes for deployments that intentionally add a trusted custom `scope` claim; unset for standard Cloudflare Access JWTs
 - Access JWKS URL/team certs endpoint
 
 For requests reaching `/mcp`, the origin should authenticate in this order:
@@ -105,7 +106,7 @@ Cloudflare assertion validation must verify:
 - exact audience
 - `resource` when present equals `https://superfast.heidiai.com.au/mcp`
 - allowed owner identity
-- required `mcp` scope
+- configured custom scope restrictions only when the deployment intentionally supplies a trusted `scope` claim
 - non-empty subject
 - normal JWT time validation
 
@@ -152,7 +153,7 @@ The canary must verify without exposing credentials:
 7. authorization-server metadata issuer matches the advertised server.
 8. authorization/token/registration endpoints are absolute HTTPS URLs.
 9. PKCE S256, authorization-code and refresh-token support are advertised.
-10. DCR for ChatGPT returns 201, preserves the callback URI and application type.
+10. DCR for ChatGPT returns 201, preserves the callback URI, and does not contradict the requested application type when that optional response field is present.
 11. an authorization-stage probe for the registered ChatGPT callback is accepted and does not return an OAuth error.
 12. token endpoint invalid-grant probes return structured OAuth JSON rather than a WAF/interstitial page.
 13. non-browser client probes do not receive Cloudflare 1010 on OAuth discovery/DCR.
@@ -165,7 +166,7 @@ The canary must record only bounded metadata such as status, content type, route
 Test-driven implementation order:
 
 1. Unit tests for Cloudflare Access JWT validation using an in-memory/generated RSA key and JWKS.
-2. HTTP handler tests proving valid Access assertion reaches `/mcp` and invalid issuer/audience/resource/identity/scope is rejected.
+2. HTTP handler tests proving a standard valid Access assertion reaches `/mcp`, invalid issuer/audience/resource/identity is rejected, and any explicitly configured custom scope restriction is enforced.
 3. Regression test proving static bearer still works for trusted origin use.
 4. Regression test proving native OAuth continues working while rollback compatibility remains enabled.
 5. Public-edge qualification script tests using fixture HTTP servers where practical.

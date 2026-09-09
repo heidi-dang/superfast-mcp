@@ -152,6 +152,41 @@ func TestVerifierAcceptsValidAccessAssertion(t *testing.T) {
 	}
 }
 
+func TestVerifierAcceptsStandardAccessAssertionWithoutOAuthScope(t *testing.T) {
+	privKey, jwk, kid := generateRSAKey(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(testJWKSResponse{Keys: []testJWK{jwk}})
+	}))
+	defer srv.Close()
+
+	cfg := defaultTestConfig(srv.URL)
+	cfg.RequiredScopes = nil
+	claims := accessClaims{
+		Email: cfg.AllowedEmail,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    cfg.Issuer,
+			Audience:  jwt.ClaimStrings{cfg.Audience},
+			Subject:   "sub-standard-access",
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(1 * time.Hour)),
+		},
+	}
+
+	tok := makeToken(t, privKey, kid, jwt.SigningMethodRS256, claims)
+	verifier, err := NewVerifier(cfg, srv.Client())
+	if err != nil {
+		t.Fatalf("NewVerifier failed: %v", err)
+	}
+
+	identity, err := verifier.Verify(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("Verify failed for standard Access JWT without OAuth scope: %v", err)
+	}
+	if identity.Subject != "sub-standard-access" || identity.Scope != "" {
+		t.Fatalf("identity = %#v, want standard Access identity with empty scope", identity)
+	}
+}
+
 func TestVerifierRejectsWrongIssuer(t *testing.T) {
 	privKey, jwk, kid := generateRSAKey(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -17,7 +17,7 @@
 - Preserve static bearer authentication as an origin/break-glass path.
 - Preserve native Go OAuth temporarily for rollback, but do not advertise it to ChatGPT after Access cutover.
 - Never log `Authorization`, `Cf-Access-Jwt-Assertion`, OAuth codes, PKCE verifiers, access/refresh tokens, cookies, or owner credentials.
-- Require exact issuer, audience, owner identity, `mcp` scope, non-empty subject, JWT time validity, and matching `resource` when that claim is present.
+- Require exact issuer, audience, owner identity, non-empty subject, and JWT time validity; enforce matching `resource` when present and custom scope restrictions only when the deployment intentionally supplies a trusted `scope` claim.
 - Do not globally disable Cloudflare WAF/Bot protections; use the narrowest hostname/path policy required.
 - Production acceptance requires ChatGPT OAuth + Scan Tools to complete without HTTP 424 and expose exactly eight tools.
 - Keep the existing public-origin/plaintext-HTTP architecture as an explicitly documented temporary risk; private/authenticated origin transport is a separate hardening follow-up.
@@ -141,7 +141,7 @@ Rules:
 - Normalize issuer by trimming one trailing `/`.
 - Default JWKS URL to `<issuer>/cdn-cgi/access/certs` when omitted.
 - Resource is always `<public-url>/mcp`.
-- Default required scopes to `[]string{"mcp"}`.
+- Default required scopes to empty; standard Cloudflare Access application JWTs do not normally contain OAuth scope claims. Parse and enforce `SUPERFAST_CF_ACCESS_REQUIRED_SCOPES` only when the deployment intentionally supplies a trusted custom `scope` claim.
 - Reject an issuer/JWKS URL that is not absolute HTTPS.
 - Reject empty scope entries.
 
@@ -163,7 +163,7 @@ Document the variables with non-secret placeholders only:
 # SUPERFAST_CF_ACCESS_AUDIENCE=replace-with-access-application-aud
 # SUPERFAST_CF_ACCESS_ALLOWED_EMAIL=owner@example.com
 # SUPERFAST_CF_ACCESS_JWKS_URL=https://your-team.cloudflareaccess.com/cdn-cgi/access/certs
-# SUPERFAST_CF_ACCESS_REQUIRED_SCOPES=mcp
+# Leave SUPERFAST_CF_ACCESS_REQUIRED_SCOPES unset for standard Cloudflare Access JWTs; set it only for an intentionally supplied trusted custom scope claim.
 ```
 
 - [ ] **Step 6: Commit Task 1**
@@ -483,7 +483,7 @@ Create an `httptest.Server` that emulates the stable reference contract:
 1. `/mcp` → `401` with `resource_metadata`.
 2. protected-resource metadata → Access authorization server.
 3. authorization metadata → DCR/token/authorize endpoints with PKCE and refresh grant.
-4. DCR → `201`, preserving ChatGPT callback/application type.
+4. DCR → `201`, preserving the ChatGPT callback and not contradicting `application_type=web` when that optional response field is present.
 5. authorization stage → `302` to an interactive identity URL without OAuth error.
 6. invalid token probe → JSON OAuth error.
 
@@ -532,7 +532,7 @@ Required checks mirror the stable repo's `scripts/check-public-edge.mjs`:
 }
 ```
 
-- Require returned redirect URI and application type to match exactly.
+- Require the returned redirect URI to match exactly; if the DCR response includes `application_type`, require it to be `web`, while accepting omission because Cloudflare Managed OAuth omits that optional response field.
 - Probe authorization stage with PKCE S256 and require no OAuth error/interstitial.
 
 - [ ] **Step 4: Add authenticated MCP qualification when `AccessToken` is present**
@@ -594,7 +594,7 @@ git commit -m "test: add Cloudflare managed OAuth edge gate"
 - Modify: `deploy/env.example` if final names changed during Tasks 1–4.
 
 **Interfaces:**
-- Version target: `0.2.0` because the public authentication architecture changes while the MCP tool contract remains stable.
+- Version target: `0.2.1`: `0.2.0` introduced the managed-auth architecture, and `0.2.1` corrects the Cloudflare Access JWT contract so standard assertions are not required to carry an OAuth scope claim.
 
 - [ ] **Step 1: Write a version regression test**
 
@@ -604,7 +604,7 @@ Add to `internal/config/config_test.go`:
 func TestCurrentVersion(t *testing.T) {
     cfg, err := ParseArgs([]string{"--allow-unauthenticated-http"}, envMap(nil))
     if err != nil { t.Fatal(err) }
-    if cfg.Version != "0.2.0" { t.Fatalf("version=%q", cfg.Version) }
+    if cfg.Version != "0.2.1" { t.Fatalf("version=%q", cfg.Version) }
 }
 ```
 
@@ -851,14 +851,14 @@ SUPERFAST_CF_ACCESS_ISSUER=https://<team>.cloudflareaccess.com
 SUPERFAST_CF_ACCESS_AUDIENCE=<application-aud>
 SUPERFAST_CF_ACCESS_ALLOWED_EMAIL=<owner-email>
 SUPERFAST_CF_ACCESS_JWKS_URL=https://<team>.cloudflareaccess.com/cdn-cgi/access/certs
-SUPERFAST_CF_ACCESS_REQUIRED_SCOPES=mcp
+# Leave SUPERFAST_CF_ACCESS_REQUIRED_SCOPES unset for standard Cloudflare Access Managed OAuth assertions.
 ```
 
 Keep file mode `0600`, owned by `heidi`, and do not print the values in command output.
 
 - [ ] **Step 2: Restart and verify local health/readiness**
 
-Require systemd `active`, loopback listener present, and `/health` version `0.2.0`.
+Require systemd `active`, loopback listener present, and `/health` version `0.2.1`.
 
 - [ ] **Step 3: Verify invalid Access assertion is rejected locally**
 

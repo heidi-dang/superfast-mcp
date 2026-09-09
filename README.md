@@ -58,7 +58,7 @@ Remote HTTP fails closed unless authentication is configured or unauthenticated 
 
 ### Cloudflare managed mode — recommended for production
 
-Cloudflare Access owns the public OAuth flow and the externally observed `/mcp` `WWW-Authenticate` challenge. The Go origin does not trust the Cloudflare header by itself: it validates `Cf-Access-Jwt-Assertion` with the configured Access issuer, application audience, owner identity, JWKS, resource, scope, signature, and JWT time claims. The existing static bearer remains available as an origin/break-glass path, and native OAuth is retained temporarily for rollback.
+Cloudflare Access owns the public OAuth flow and the externally observed `/mcp` `WWW-Authenticate` challenge. The Go origin does not trust the Cloudflare header by itself: it validates `Cf-Access-Jwt-Assertion` with the configured Access issuer, application audience, owner identity, JWKS, signature, and JWT time claims, plus resource/scope restrictions when those claims are intentionally used. The existing static bearer remains available as an origin/break-glass path, and native OAuth is retained temporarily for rollback.
 
 Example origin configuration, using placeholders only:
 
@@ -71,12 +71,11 @@ export SUPERFAST_AUTH_TOKEN_FILE=/run/secrets/superfast-mcp-token
 export SUPERFAST_CF_ACCESS_ISSUER=https://your-team.cloudflareaccess.com
 export SUPERFAST_CF_ACCESS_AUDIENCE=replace-with-access-application-aud
 export SUPERFAST_CF_ACCESS_ALLOWED_EMAIL=owner@example.com
-export SUPERFAST_CF_ACCESS_REQUIRED_SCOPES=mcp
 
 ./superfast-mcp
 ```
 
-`SUPERFAST_CF_ACCESS_JWKS_URL` is optional and defaults to `<issuer>/cdn-cgi/access/certs`. Keep all real Access identifiers, identities, and credentials outside source control.
+`SUPERFAST_CF_ACCESS_JWKS_URL` is optional and defaults to `<issuer>/cdn-cgi/access/certs`. `SUPERFAST_CF_ACCESS_REQUIRED_SCOPES` is also optional; leave it unset for standard Cloudflare Access Managed OAuth assertions because Access application JWTs do not normally contain OAuth scope claims. Only configure it when your deployment intentionally supplies a trusted custom `scope` claim. Keep all real Access identifiers, identities, and credentials outside source control.
 
 Qualify the public Cloudflare Managed OAuth contract without printing credentials:
 

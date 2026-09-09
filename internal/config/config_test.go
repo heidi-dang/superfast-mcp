@@ -15,8 +15,8 @@ func TestCurrentVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != "0.2.0" {
-		t.Fatalf("version=%q, want 0.2.0", cfg.Version)
+	if cfg.Version != "0.2.1" {
+		t.Fatalf("version=%q, want 0.2.1", cfg.Version)
 	}
 }
 
@@ -133,8 +133,8 @@ func TestParseArgsCloudflareAccessComplete(t *testing.T) {
 	if cfg.CloudflareAccess.Resource != "https://mcp.example.com/mcp" {
 		t.Fatalf("Resource = %q, want https://mcp.example.com/mcp", cfg.CloudflareAccess.Resource)
 	}
-	if len(cfg.CloudflareAccess.RequiredScopes) != 1 || cfg.CloudflareAccess.RequiredScopes[0] != "mcp" {
-		t.Fatalf("RequiredScopes = %#v, want [\"mcp\"]", cfg.CloudflareAccess.RequiredScopes)
+	if len(cfg.CloudflareAccess.RequiredScopes) != 0 {
+		t.Fatalf("RequiredScopes = %#v, want no default scope requirement for standard Cloudflare Access JWTs", cfg.CloudflareAccess.RequiredScopes)
 	}
 }
 
