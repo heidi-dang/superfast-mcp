@@ -528,14 +528,12 @@ func (s *Server) issueTokens(w http.ResponseWriter, clientID, scope, resource st
 		"expires_in":   int(accessTTL.Seconds()),
 		"scope":        scope,
 	}
-	if slices.Contains(strings.Fields(scope), "offline_access") {
-		refresh, err := s.mintToken(refreshPrefix, "refresh", clientID, scope, resource, now.Add(refreshTTL))
-		if err != nil {
-			writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to issue refresh token")
-			return
-		}
-		response["refresh_token"] = refresh
+	refresh, err := s.mintToken(refreshPrefix, "refresh", clientID, scope, resource, now.Add(refreshTTL))
+	if err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "failed to issue refresh token")
+		return
 	}
+	response["refresh_token"] = refresh
 	writeJSON(w, http.StatusOK, response)
 }
 

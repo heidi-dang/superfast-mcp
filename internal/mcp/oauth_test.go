@@ -58,6 +58,86 @@ func TestHTTPHandlerOAuthAuthorizationPageAllowsExplicitIssuerFormAction(t *test
 	}
 }
 
+func TestHTTPHandlerOAuthIssuesRefreshTokenWithoutOfflineAccess(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicURL = "https://superfast.example.com"
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registration := `{"redirect_uris":["https://chatgpt.example/callback"],"client_name":"ChatGPT","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web"}`
+	registerReq := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(registration))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201; body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	var registered struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registered); err != nil {
+		t.Fatal(err)
+	}
+
+	verifier := strings.Repeat("v", 64)
+	challengeBytes := sha256.Sum256([]byte(verifier))
+	ownerMAC := hmac.New(sha256.New, []byte(cfg.AuthToken))
+	_, _ = ownerMAC.Write([]byte("superfast-mcp/oauth-owner/v1"))
+	ownerPassword := hex.EncodeToString(ownerMAC.Sum(nil))
+	authorizeQuery := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registered.ClientID},
+		"redirect_uri":          {"https://chatgpt.example/callback"},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challengeBytes[:])},
+		"code_challenge_method": {"S256"},
+		"resource":              {"https://superfast.example.com/mcp"},
+		"scope":                 {"mcp"},
+	}
+	authorizePath := "/authorize?" + authorizeQuery.Encode()
+	authorizeReq := httptest.NewRequest(http.MethodPost, authorizePath, strings.NewReader(url.Values{"owner_password": {ownerPassword}}.Encode()))
+	authorizeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	authorizeRec := httptest.NewRecorder()
+	handler.ServeHTTP(authorizeRec, authorizeReq)
+	if authorizeRec.Code != http.StatusSeeOther {
+		t.Fatalf("authorize status = %d, want 303; body=%s", authorizeRec.Code, authorizeRec.Body.String())
+	}
+	redirect, err := url.Parse(authorizeRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := redirect.Query().Get("code")
+	if code == "" {
+		t.Fatal("authorization redirect missing code")
+	}
+
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {registered.ClientID},
+		"redirect_uri":  {"https://chatgpt.example/callback"},
+		"code":          {code},
+		"code_verifier": {verifier},
+		"resource":      {"https://superfast.example.com/mcp"},
+	}
+	tokenReq := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(tokenForm.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRec := httptest.NewRecorder()
+	handler.ServeHTTP(tokenRec, tokenReq)
+	if tokenRec.Code != http.StatusOK {
+		t.Fatalf("token status = %d, want 200; body=%s", tokenRec.Code, tokenRec.Body.String())
+	}
+	var tokens struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(tokenRec.Body.Bytes(), &tokens); err != nil {
+		t.Fatal(err)
+	}
+	if tokens.RefreshToken == "" {
+		t.Fatalf("scope=mcp token response omitted refresh_token: %s", tokenRec.Body.String())
+	}
+}
+
 func TestHTTPHandlerUsesConfiguredOAuthOwnerPassword(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.PublicURL = "https://superfast.example.com"
