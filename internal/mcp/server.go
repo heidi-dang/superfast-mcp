@@ -2,7 +2,6 @@ package mcpx
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/heidi-dang/superfast-mcp/internal/access"
 	"github.com/heidi-dang/superfast-mcp/internal/config"
 	"github.com/heidi-dang/superfast-mcp/internal/fs"
 	"github.com/heidi-dang/superfast-mcp/internal/git"
@@ -102,8 +102,8 @@ func RunStdio(cfg *config.Config) error {
 }
 
 func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
-	if cfg.AuthToken == "" && !cfg.AllowUnauthenticatedHTTP {
-		return nil, fmt.Errorf("HTTP MCP requires bearer authentication; configure SUPERFAST_AUTH_TOKEN or explicitly allow unauthenticated HTTP")
+	if cfg.AuthToken == "" && cfg.CloudflareAccess == nil && !cfg.AllowUnauthenticatedHTTP {
+		return nil, fmt.Errorf("HTTP MCP requires authentication; configure SUPERFAST_AUTH_TOKEN or Cloudflare Access, or explicitly allow unauthenticated HTTP")
 	}
 	server, err := NewServer(cfg)
 	if err != nil {
@@ -119,17 +119,33 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 		}
 		mcpHandler.ServeHTTP(w, r)
 	})
-	protectedMCP := bearerAuth(cfg.AuthToken, limitedMCP)
+
+	var accessVerifier access.Verifier
+	if cfg.CloudflareAccess != nil {
+		accessVerifier, err = access.NewVerifier(*cfg.CloudflareAccess, nil)
+		if err != nil {
+			return nil, fmt.Errorf("configure Cloudflare Access verifier: %w", err)
+		}
+	}
 
 	mux := http.NewServeMux()
+	var nativeOAuth *oauthserver.Server
 	if cfg.AuthToken != "" && cfg.PublicURL != "" {
 		issuer := strings.TrimRight(cfg.PublicURL, "/")
-		oauthServer, err := oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken, cfg.OAuthOwnerPassword)
+		nativeOAuth, err = oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken, cfg.OAuthOwnerPassword)
 		if err != nil {
 			return nil, err
 		}
-		oauthServer.RegisterRoutes(mux)
-		protectedMCP = bearerAuthWithOAuth(cfg.AuthToken, oauthServer, limitedMCP)
+		nativeOAuth.RegisterRoutes(mux)
+	}
+
+	protectedMCP := http.Handler(limitedMCP)
+	if cfg.AuthToken != "" || accessVerifier != nil || nativeOAuth != nil {
+		protectedMCP = authenticateMCP(mcpAuthOptions{
+			StaticToken: cfg.AuthToken,
+			Access:      accessVerifier,
+			NativeOAuth: nativeOAuth,
+		}, limitedMCP)
 	}
 	mux.Handle("/mcp", protectedMCP)
 	mux.Handle("/mcp/", protectedMCP)
@@ -203,36 +219,6 @@ func RunHTTP(cfg *config.Config) error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
-}
-
-func bearerAuth(token string, next http.Handler) http.Handler {
-	if token == "" {
-		return next
-	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		parts := strings.Fields(r.Header.Get("Authorization"))
-		valid := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && subtle.ConstantTimeCompare([]byte(parts[1]), []byte(token)) == 1
-		if !valid {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="superfast-mcp"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func bearerAuthWithOAuth(token string, oauthServer *oauthserver.Server, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		parts := strings.Fields(r.Header.Get("Authorization"))
-		valid := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") &&
-			(subtle.ConstantTimeCompare([]byte(parts[1]), []byte(token)) == 1 || oauthServer.VerifyAccessToken(parts[1]))
-		if !valid {
-			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="superfast-mcp", resource_metadata=%q, scope="mcp"`, oauthServer.ResourceMetadataURL()))
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 func Run(cfg *config.Config) error {
