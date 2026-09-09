@@ -122,18 +122,18 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 	if rawIssuer != "" || rawAudience != "" || rawAllowedEmail != "" || rawJWKSURL != "" || rawRequiredScopes != "" {
 		issuer := strings.TrimSpace(rawIssuer)
 		if issuer == "" {
-			return nil, fmt.Errorf("Cloudflare Access issuer is required")
+			return nil, fmt.Errorf("missing Cloudflare Access issuer")
 		}
 		audience := strings.TrimSpace(rawAudience)
 		if audience == "" {
-			return nil, fmt.Errorf("Cloudflare Access audience is required")
+			return nil, fmt.Errorf("missing Cloudflare Access audience")
 		}
 		allowedEmail := strings.TrimSpace(rawAllowedEmail)
 		if allowedEmail == "" {
-			return nil, fmt.Errorf("Cloudflare Access allowed email is required")
+			return nil, fmt.Errorf("missing Cloudflare Access allowed email")
 		}
 		if c.PublicURL == "" {
-			return nil, fmt.Errorf("Cloudflare Access requires non-empty SUPERFAST_PUBLIC_URL")
+			return nil, fmt.Errorf("missing SUPERFAST_PUBLIC_URL required by Cloudflare Access")
 		}
 
 		issuer = strings.TrimSuffix(issuer, "/")
@@ -156,12 +156,12 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 			requiredScopes = []string{"mcp"}
 		} else {
 			if strings.TrimSpace(rawRequiredScopes) == "" {
-				return nil, fmt.Errorf("Cloudflare Access required scopes cannot contain empty entries")
+				return nil, fmt.Errorf("invalid Cloudflare Access required scopes: empty entries are not allowed")
 			}
 			for _, part := range strings.Split(rawRequiredScopes, ",") {
 				scope := strings.TrimSpace(part)
 				if scope == "" {
-					return nil, fmt.Errorf("Cloudflare Access required scopes cannot contain empty entries")
+					return nil, fmt.Errorf("invalid Cloudflare Access required scopes: empty entries are not allowed")
 				}
 				requiredScopes = append(requiredScopes, scope)
 			}

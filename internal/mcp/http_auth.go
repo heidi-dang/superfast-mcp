@@ -54,10 +54,6 @@ func bearerAuth(token string, next http.Handler) http.Handler {
 	return authenticateMCP(mcpAuthOptions{StaticToken: token}, next)
 }
 
-func bearerAuthWithOAuth(token string, oauthServer *oauthserver.Server, next http.Handler) http.Handler {
-	return authenticateMCP(mcpAuthOptions{StaticToken: token, NativeOAuth: oauthServer}, next)
-}
-
 func bearerToken(header string) (string, bool) {
 	parts := strings.Fields(header)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
