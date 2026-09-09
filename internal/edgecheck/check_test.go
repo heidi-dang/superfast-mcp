@@ -12,12 +12,13 @@ import (
 )
 
 type managedFixtureOptions struct {
-	resourceMetadataPath string
-	htmlTokenProbe       bool
-	mutateDCRCallback    bool
-	missingRefreshGrant  bool
-	nonHTTPSMetadata     bool
-	tools                []string
+	resourceMetadataPath   string
+	htmlTokenProbe         bool
+	mutateDCRCallback      bool
+	omitDCRApplicationType bool
+	missingRefreshGrant    bool
+	nonHTTPSMetadata       bool
+	tools                  []string
 }
 
 func TestCheckAcceptsCloudflareManagedOAuthContract(t *testing.T) {
@@ -60,6 +61,20 @@ func TestCheckRejectsHTMLTokenInterstitial(t *testing.T) {
 	_, err := Check(t.Context(), fixture.Client(), Options{MCPURL: fixture.URL + "/mcp", Timeout: 2 * time.Second})
 	if err == nil || !strings.Contains(err.Error(), "token probe") || !strings.Contains(err.Error(), "html") {
 		t.Fatalf("error = %v, want sanitized HTML token-probe rejection", err)
+	}
+}
+
+func TestCheckAcceptsDCRResponseWithoutApplicationType(t *testing.T) {
+	fixture := newManagedFixture(t, managedFixtureOptions{omitDCRApplicationType: true})
+	defer fixture.Close()
+
+	_, err := Check(t.Context(), fixture.Client(), Options{
+		MCPURL:          fixture.URL + "/mcp",
+		ChatGPTRedirect: "https://chatgpt.com/connector_platform_oauth_redirect",
+		Timeout:         2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Check failed when DCR response omitted optional application_type: %v", err)
 	}
 }
 
@@ -201,11 +216,14 @@ func newManagedFixture(t *testing.T, opts managedFixtureOptions) *httptest.Serve
 			if opts.mutateDCRCallback {
 				redirects = []string{"https://mutated.example/callback"}
 			}
-			writeFixtureJSON(w, http.StatusCreated, map[string]any{
-				"client_id":        "fixture-client",
-				"redirect_uris":    redirects,
-				"application_type": "web",
-			})
+			response := map[string]any{
+				"client_id":     "fixture-client",
+				"redirect_uris": redirects,
+			}
+			if !opts.omitDCRApplicationType {
+				response["application_type"] = "web"
+			}
+			writeFixtureJSON(w, http.StatusCreated, response)
 		case "/authorize":
 			if r.URL.Query().Get("response_type") != "code" || r.URL.Query().Get("client_id") != "fixture-client" ||
 				r.URL.Query().Get("code_challenge_method") != "S256" || r.URL.Query().Get("code_challenge") == "" {

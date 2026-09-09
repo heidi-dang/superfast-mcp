@@ -375,8 +375,8 @@ func registerChatGPTClient(ctx context.Context, client *http.Client, endpoint, r
 	if len(registered.RedirectURIs) != 1 || registered.RedirectURIs[0] != redirect {
 		return "", fmt.Errorf("DCR returned redirect URI mutation")
 	}
-	if registered.ApplicationType != "web" {
-		return "", fmt.Errorf("DCR returned application type %q, want web", registered.ApplicationType)
+	if registered.ApplicationType != "" && registered.ApplicationType != "web" {
+		return "", fmt.Errorf("DCR returned application type %q, want web when present", registered.ApplicationType)
 	}
 	return registered.ClientID, nil
 }
