@@ -3,10 +3,20 @@ package config
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 )
+
+type CloudflareAccessConfig struct {
+	Issuer         string
+	Audience       string
+	AllowedEmail   string
+	JWKSURL        string
+	Resource       string
+	RequiredScopes []string
+}
 
 type Config struct {
 	HTTPAddr                 string
@@ -19,6 +29,7 @@ type Config struct {
 	OAuthOwnerPassword       string
 	AllowUnauthenticatedHTTP bool
 	Version                  string
+	CloudflareAccess         *CloudflareAccessConfig
 }
 
 func Parse() (*Config, error) {
@@ -101,7 +112,83 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		c.Roots = []string{wd}
 	}
 	c.PublicURL = strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
+
+	rawIssuer := getenv("SUPERFAST_CF_ACCESS_ISSUER")
+	rawAudience := getenv("SUPERFAST_CF_ACCESS_AUDIENCE")
+	rawAllowedEmail := getenv("SUPERFAST_CF_ACCESS_ALLOWED_EMAIL")
+	rawJWKSURL := getenv("SUPERFAST_CF_ACCESS_JWKS_URL")
+	rawRequiredScopes := getenv("SUPERFAST_CF_ACCESS_REQUIRED_SCOPES")
+
+	if rawIssuer != "" || rawAudience != "" || rawAllowedEmail != "" || rawJWKSURL != "" || rawRequiredScopes != "" {
+		issuer := strings.TrimSpace(rawIssuer)
+		if issuer == "" {
+			return nil, fmt.Errorf("Cloudflare Access issuer is required")
+		}
+		audience := strings.TrimSpace(rawAudience)
+		if audience == "" {
+			return nil, fmt.Errorf("Cloudflare Access audience is required")
+		}
+		allowedEmail := strings.TrimSpace(rawAllowedEmail)
+		if allowedEmail == "" {
+			return nil, fmt.Errorf("Cloudflare Access allowed email is required")
+		}
+		if c.PublicURL == "" {
+			return nil, fmt.Errorf("Cloudflare Access requires non-empty SUPERFAST_PUBLIC_URL")
+		}
+
+		issuer = strings.TrimSuffix(issuer, "/")
+		if err := validateAbsoluteHTTPS(issuer, "Cloudflare Access issuer"); err != nil {
+			return nil, err
+		}
+
+		jwksURL := strings.TrimSpace(rawJWKSURL)
+		if jwksURL == "" {
+			jwksURL = issuer + "/cdn-cgi/access/certs"
+		}
+		if err := validateAbsoluteHTTPS(jwksURL, "Cloudflare Access JWKS URL"); err != nil {
+			return nil, err
+		}
+
+		resource := c.PublicURL + "/mcp"
+
+		var requiredScopes []string
+		if rawRequiredScopes == "" {
+			requiredScopes = []string{"mcp"}
+		} else {
+			if strings.TrimSpace(rawRequiredScopes) == "" {
+				return nil, fmt.Errorf("Cloudflare Access required scopes cannot contain empty entries")
+			}
+			for _, part := range strings.Split(rawRequiredScopes, ",") {
+				scope := strings.TrimSpace(part)
+				if scope == "" {
+					return nil, fmt.Errorf("Cloudflare Access required scopes cannot contain empty entries")
+				}
+				requiredScopes = append(requiredScopes, scope)
+			}
+		}
+
+		c.CloudflareAccess = &CloudflareAccessConfig{
+			Issuer:         issuer,
+			Audience:       audience,
+			AllowedEmail:   allowedEmail,
+			JWKSURL:        jwksURL,
+			Resource:       resource,
+			RequiredScopes: requiredScopes,
+		}
+	}
+
 	return c, nil
+}
+
+func validateAbsoluteHTTPS(rawURL, fieldName string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid URL: %w", fieldName, err)
+	}
+	if u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("%s must be an absolute HTTPS URL: %s", fieldName, rawURL)
+	}
+	return nil
 }
 
 func envDefault(getenv func(string) string, key, fallback string) string {
