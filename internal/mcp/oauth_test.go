@@ -53,8 +53,8 @@ func TestHTTPHandlerOAuthAuthorizationPageAllowsExplicitIssuerFormAction(t *test
 		t.Fatalf("authorization page status = %d, want 200", authorizeRec.Code)
 	}
 	csp := authorizeRec.Header().Get("Content-Security-Policy")
-	if !strings.Contains(csp, "form-action 'self' https://superfast.example.com") {
-		t.Fatalf("CSP form-action does not explicitly allow issuer: %q", csp)
+	if !strings.Contains(csp, "form-action 'self' https://superfast.example.com https://chatgpt.example") {
+		t.Fatalf("CSP form-action does not explicitly allow issuer and registered redirect origin: %q", csp)
 	}
 }
 

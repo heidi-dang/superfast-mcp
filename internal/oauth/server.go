@@ -363,9 +363,11 @@ func (s *Server) renderAuthorizationPage(w http.ResponseWriter, r *http.Request,
 	if r.URL.RawQuery != "" {
 		action += "?" + r.URL.RawQuery
 	}
+	redirect, _ := url.Parse(request.RedirectURI)
+	redirectOrigin := (&url.URL{Scheme: redirect.Scheme, Host: redirect.Host}).String()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; style-src 'unsafe-inline'; form-action 'self' %s; frame-ancestors 'none'; base-uri 'none'", s.issuer))
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; style-src 'unsafe-inline'; form-action 'self' %s %s; frame-ancestors 'none'; base-uri 'none'", s.issuer, redirectOrigin))
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.WriteHeader(status)
