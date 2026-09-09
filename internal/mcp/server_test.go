@@ -31,6 +31,57 @@ func TestHTTPHandlerRequiresAuthenticationForMCP(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerPublishesOAuthDiscovery(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicURL = "https://superfast.example.com"
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	metadataReq := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil)
+	metadataRec := httptest.NewRecorder()
+	handler.ServeHTTP(metadataRec, metadataReq)
+	if metadataRec.Code != http.StatusOK {
+		t.Fatalf("protected resource metadata status = %d, want 200; body=%s", metadataRec.Code, metadataRec.Body.String())
+	}
+	metadataBody := metadataRec.Body.String()
+	if !strings.Contains(metadataBody, `"resource":"https://superfast.example.com/mcp"`) ||
+		!strings.Contains(metadataBody, `"authorization_servers":["https://superfast.example.com"]`) {
+		t.Fatalf("unexpected protected resource metadata: %s", metadataBody)
+	}
+
+	authMetadataReq := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	authMetadataRec := httptest.NewRecorder()
+	handler.ServeHTTP(authMetadataRec, authMetadataReq)
+	if authMetadataRec.Code != http.StatusOK {
+		t.Fatalf("authorization metadata status = %d, want 200; body=%s", authMetadataRec.Code, authMetadataRec.Body.String())
+	}
+	authMetadataBody := authMetadataRec.Body.String()
+	for _, want := range []string{
+		`"issuer":"https://superfast.example.com"`,
+		`"authorization_endpoint":"https://superfast.example.com/authorize"`,
+		`"token_endpoint":"https://superfast.example.com/token"`,
+		`"registration_endpoint":"https://superfast.example.com/register"`,
+		`"S256"`,
+	} {
+		if !strings.Contains(authMetadataBody, want) {
+			t.Fatalf("authorization metadata missing %s: %s", want, authMetadataBody)
+		}
+	}
+
+	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	mcpRec := httptest.NewRecorder()
+	handler.ServeHTTP(mcpRec, mcpReq)
+	if mcpRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated MCP status = %d, want 401", mcpRec.Code)
+	}
+	challenge := mcpRec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(challenge, `resource_metadata="https://superfast.example.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("OAuth challenge missing resource metadata URL: %q", challenge)
+	}
+}
+
 func TestBearerAuthAcceptsValidToken(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	handler := bearerAuth("secret", next)

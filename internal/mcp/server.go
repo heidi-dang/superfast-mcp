@@ -17,6 +17,7 @@ import (
 	"github.com/heidi-dang/superfast-mcp/internal/config"
 	"github.com/heidi-dang/superfast-mcp/internal/fs"
 	"github.com/heidi-dang/superfast-mcp/internal/git"
+	oauthserver "github.com/heidi-dang/superfast-mcp/internal/oauth"
 	"github.com/heidi-dang/superfast-mcp/internal/roots"
 	"github.com/heidi-dang/superfast-mcp/internal/shell"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -121,6 +122,15 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 	protectedMCP := bearerAuth(cfg.AuthToken, limitedMCP)
 
 	mux := http.NewServeMux()
+	if cfg.AuthToken != "" && cfg.PublicURL != "" {
+		issuer := strings.TrimRight(cfg.PublicURL, "/")
+		oauthServer, err := oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken)
+		if err != nil {
+			return nil, err
+		}
+		oauthServer.RegisterRoutes(mux)
+		protectedMCP = bearerAuthWithOAuth(cfg.AuthToken, oauthServer, limitedMCP)
+	}
 	mux.Handle("/mcp", protectedMCP)
 	mux.Handle("/mcp/", protectedMCP)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +214,20 @@ func bearerAuth(token string, next http.Handler) http.Handler {
 		valid := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && subtle.ConstantTimeCompare([]byte(parts[1]), []byte(token)) == 1
 		if !valid {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="superfast-mcp"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func bearerAuthWithOAuth(token string, oauthServer *oauthserver.Server, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Fields(r.Header.Get("Authorization"))
+		valid := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") &&
+			(subtle.ConstantTimeCompare([]byte(parts[1]), []byte(token)) == 1 || oauthServer.VerifyAccessToken(parts[1]))
+		if !valid {
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="superfast-mcp", resource_metadata=%q, scope="mcp"`, oauthServer.ResourceMetadataURL()))
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

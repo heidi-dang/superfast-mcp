@@ -54,7 +54,7 @@ Example local MCP client configuration:
 
 ## Remote HTTP
 
-Remote HTTP fails closed unless bearer authentication is configured or unauthenticated mode is explicitly requested.
+Remote HTTP fails closed unless authentication is configured or unauthenticated mode is explicitly requested. When `SUPERFAST_PUBLIC_URL` and `SUPERFAST_AUTH_TOKEN` are both set, the server automatically exposes MCP-compatible OAuth 2.1 discovery, Dynamic Client Registration, PKCE authorization-code flow, and refresh tokens. The static bearer token remains available as a break-glass credential.
 
 ```bash
 export SUPERFAST_HTTP=127.0.0.1:8787
@@ -66,13 +66,9 @@ export SUPERFAST_AUTH_TOKEN="$(openssl rand -hex 32)"
 ./superfast-mcp
 ```
 
-Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. Clients send:
+Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. OAuth-capable MCP clients discover the protected resource and authorization server from the standard `/.well-known/` endpoints, register as public clients, and use PKCE-S256. The authorization page requires the server owner's derived authorization password before issuing a code. Access tokens are resource-bound and expire after one hour; refresh tokens are issued when `offline_access` is requested.
 
-```text
-Authorization: Bearer <token>
-```
-
-For production, keep the token outside shell history and source control. `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` can load it from a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
+Static clients can still send `Authorization: Bearer <token>` directly. For production, keep the master token outside shell history and source control. `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` can load it from a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
 
 `--allow-unauthenticated-http` / `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP=true` is an explicit escape hatch for a separately protected trusted network or proxy. Do not use it on a directly reachable host.
 

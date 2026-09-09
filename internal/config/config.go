@@ -50,7 +50,7 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		LogJSON:                  logJSON,
 		AuthToken:                strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN")),
 		AllowUnauthenticatedHTTP: allowUnauthenticated,
-		Version:                  "0.1.1",
+		Version:                  "0.1.2",
 	}
 	rootsValue := getenv("SUPERFAST_ROOTS")
 	authTokenFile := strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN_FILE"))
