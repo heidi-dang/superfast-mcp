@@ -1,22 +1,25 @@
 package shell
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
+	"syscall"
 	"time"
 
+	"github.com/heidi-dang/superfast-mcp/internal/limitio"
+	"github.com/heidi-dang/superfast-mcp/internal/roots"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Service struct {
-	roots   []string
+	roots   *roots.Set
 	timeout time.Duration
 }
 
-func New(roots []string) *Service {
-	return &Service{roots: roots, timeout: 60 * time.Second}
+func New(rootSet *roots.Set) *Service {
+	return &Service{roots: rootSet, timeout: 60 * time.Second}
 }
 
 type RunArgs struct {
@@ -35,9 +38,13 @@ type RunOut struct {
 }
 
 func (s *Service) Run(ctx context.Context, req *mcp.CallToolRequest, args RunArgs) (*mcp.CallToolResult, RunOut, error) {
-	cwd := args.Cwd
-	if cwd == "" && len(s.roots) > 0 {
-		cwd = s.roots[0]
+	if strings.TrimSpace(args.Command) == "" {
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "command must not be empty"}}}, RunOut{}, nil
+	}
+
+	cwd, err := s.roots.ResolveExistingDir(args.Cwd)
+	if err != nil {
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: err.Error()}}}, RunOut{}, nil
 	}
 	to := s.timeout
 	if args.Timeout > 0 {
@@ -51,16 +58,25 @@ func (s *Service) Run(ctx context.Context, req *mcp.CallToolRequest, args RunArg
 
 	cmd := exec.CommandContext(ctx, "bash", "-lc", args.Command)
 	cmd.Dir = cwd
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 2 * time.Second
+	stdout := limitio.NewBuffer(64 * 1024)
+	stderr := limitio.NewBuffer(32 * 1024)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	out := RunOut{
 		Command: args.Command,
 		Cwd:     cwd,
-		Stdout:  truncate(stdout.String(), 64*1024),
-		Stderr:  truncate(stderr.String(), 32*1024),
+		Stdout:  stdout.String(),
+		Stderr:  stderr.String(),
 	}
 	if ctx.Err() == context.DeadlineExceeded {
 		out.TimedOut = true
@@ -85,13 +101,6 @@ func (s *Service) Run(ctx context.Context, req *mcp.CallToolRequest, args RunArg
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
-		IsError: out.ExitCode != 0 && !out.TimedOut,
+		IsError: out.ExitCode != 0,
 	}, out, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "\n...[truncated]"
 }

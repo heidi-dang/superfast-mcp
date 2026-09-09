@@ -118,8 +118,9 @@ function highlightTerminalText(doc, input) {
 function appendRichTerminalText(container, input) {
   const doc = container.ownerDocument;
   const frag = highlightTerminalText(doc, input);
+  const renderedChars = (frag.textContent ?? input).length;
   container.appendChild(frag);
-  return (frag.textContent ?? input).length;
+  return renderedChars;
 }
 
 /**

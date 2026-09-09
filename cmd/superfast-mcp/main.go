@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/heidi-dang/superfast-mcp/internal/config"
@@ -9,9 +9,16 @@ import (
 )
 
 func main() {
-	cfg := config.Parse()
+	cfg, err := config.Parse()
+	if err != nil {
+		slog.Error("invalid configuration", "error", err)
+		os.Exit(2)
+	}
+	if cfg.LogJSON {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
+	}
 	if err := mcpx.Run(cfg); err != nil {
-		log.Printf("server error: %v", err)
+		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
 }

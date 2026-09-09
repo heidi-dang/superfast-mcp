@@ -1,136 +1,126 @@
 # superfast-mcp
 
-**Ultra-low-latency Go MCP server + live terminal UI** for ChatGPT, Grok, and Claude.
+Fast Go MCP server for local filesystem, shell, and Git operations. It supports stdio for local MCP clients and stateless Streamable HTTP for remote clients.
 
-Local computer use (PTY, filesystem, git, coding tools) with real-time streaming into an MCP App terminal surface. Designed to sit on an existing DNS domain and deliver sub-millisecond local tool latency while keeping the public control plane thin.
+The repository currently implements Phase 0/1 tooling. The terminal UI under `web/terminal` is a preview surface; persistent PTY streaming and computer-use are not implemented yet.
 
-> Inspired by the production patterns in [chatgpt-terminal-plugin](https://github.com/heidi-dang/chatgpt-terminal-plugin) (persistent PTY, short-lived SSE for the UI, device identity, bounded tools). Re-implemented in Go for maximum speed and a single static binary.
-
-## Goals
-
-- **Speed first** — single Go binary, zero Node/Python runtime on the hot path, persistent PTY + browser context, minimal allocations.
-- **Cross-host** — works with Claude Desktop / Cursor (stdio), ChatGPT & Grok (HTTPS Streamable HTTP on your domain).
-- **Live UI** — every shell line, git output, file edit, and computer-use action streams directly into the MCP App terminal widget in real time.
-- **Secure by default** — rooted workspaces, execution profiles, device identity, short-lived UI stream tokens, no long-lived secrets in the binary.
-
-## High-level architecture
-
-```text
-ChatGPT / Grok / Claude
-        │
-        │  MCP Streamable HTTP (HTTPS on your DNS)
-        │  or stdio (Claude Desktop / Cursor)
-        ▼
-┌───────────────────────────────────────┐
-│  superfast-mcp (Go single binary)     │
-│                                       │
-│  • MCP tools (2026-07-28 stateless)   │
-│  • Persistent PTY manager             │
-│  • Filesystem / git / apply_patch     │
-│  • Computer-use (CDP)                 │
-│  • Short-lived SSE for Terminal UI    │
-│  • Optional local-agent WebSocket     │
-└───────────────────┬───────────────────┘
-                    │
-                    ▼
-          local shell / workspace
-```
-
-Two output paths (same design as chatgpt-terminal-plugin):
-
-1. **Model path** — bounded `terminal_read` / tool results with monotonic cursors (authoritative context for the LLM).
-2. **UI path** — short-lived, session-scoped SSE capability that feeds the MCP App Terminal UI only. The browser never holds the primary OAuth bearer.
-
-## Current tools (Phase 0 + 1)
+## Current tools
 
 | Tool | Description |
-|------|-------------|
-| `ping` | Health, version, roots |
-| `read_file` | Rooted text read (512KiB cap) |
-| `write_file` | Rooted write + mkdir |
-| `list_dir` | Rooted directory listing |
-| `run_command` | `bash -lc` with timeout + capture |
-| `git_status` | `git status --porcelain -b` |
-| `git_diff` | `git diff` / `--cached` |
-| `git_log` | recent `git log --oneline` |
+|---|---|
+| `ping` | Health, version, configured roots |
+| `read_file` | Rooted regular-file read, capped at 512 KiB |
+| `write_file` | Rooted write + parent directory creation, capped at 2 MiB |
+| `list_dir` | Rooted directory listing, capped at 500 entries |
+| `run_command` | `bash -lc` with bounded output and timeout |
+| `git_status` | bounded `git status --porcelain -b` |
+| `git_diff` | bounded `git diff` / `--cached` |
+| `git_log` | recent bounded `git log --oneline` |
 
-## Quick start
+Filesystem and Git paths are constrained to configured roots and use rooted filesystem operations to prevent symlink traversal. `run_command` validates its initial working directory, but the shell command itself is intentionally **not a sandbox**: it executes with the OS permissions of the server process.
+
+## Requirements
+
+- Go 1.25.12 or newer. The minimum includes security fixes required by the rooted filesystem implementation.
+- `bash` for `run_command`.
+- `git` for Git tools.
+
+## Build
 
 ```bash
 git clone https://github.com/heidi-dang/superfast-mcp.git
 cd superfast-mcp
-go build -o superfast-mcp ./cmd/superfast-mcp
-
-# Claude Desktop / Cursor (stdio)
-./superfast-mcp --stdio-only --roots /path/to/code
-
-# ChatGPT / Grok (HTTPS on your domain)
-./superfast-mcp --http :8787 --public-url https://mcp.yourdomain.com --roots /path/to/code
-# then put Caddy (see deploy/Caddyfile.example) in front of :8787
+go build -trimpath -o superfast-mcp ./cmd/superfast-mcp
 ```
 
-Claude Desktop config:
+## Local stdio
+
+```bash
+./superfast-mcp --stdio-only --roots /path/to/code
+```
+
+Example local MCP client configuration:
 
 ```json
 {
   "mcpServers": {
     "superfast": {
       "command": "/path/to/superfast-mcp",
-      "args": ["--stdio-only", "--roots", "/Users/you/code"]
+      "args": ["--stdio-only", "--roots", "/path/to/code"]
     }
   }
 }
 ```
 
-ChatGPT: Developer Mode → Create custom connector → `https://mcp.yourdomain.com/mcp`
+## Remote HTTP
+
+Remote HTTP fails closed unless bearer authentication is configured or unauthenticated mode is explicitly requested.
+
+```bash
+export SUPERFAST_HTTP=127.0.0.1:8787
+export SUPERFAST_HTTP_ONLY=true
+export SUPERFAST_PUBLIC_URL=https://mcp.example.com
+export SUPERFAST_ROOTS=/path/to/code
+export SUPERFAST_AUTH_TOKEN="$(openssl rand -hex 32)"
+
+./superfast-mcp
+```
+
+Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. Clients send:
+
+```text
+Authorization: Bearer <token>
+```
+
+For production, keep the token outside shell history and source control. `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` can load it from a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
+
+`--allow-unauthenticated-http` / `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP=true` is an explicit escape hatch for a separately protected trusted network or proxy. Do not use it on a directly reachable host.
+
+## Environment
+
+Supported variables:
+
+- `SUPERFAST_HTTP`
+- `SUPERFAST_PUBLIC_URL`
+- `SUPERFAST_ROOTS`
+- `SUPERFAST_STDIO_ONLY`
+- `SUPERFAST_HTTP_ONLY`
+- `SUPERFAST_LOG_JSON`
+- `SUPERFAST_AUTH_TOKEN`
+- `SUPERFAST_AUTH_TOKEN_FILE`
+- `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP`
+
+See `deploy/env.example` for a production-oriented baseline.
 
 ## Repository layout
 
 ```text
 superfast-mcp/
-├── cmd/superfast-mcp/     # main binary
+├── cmd/superfast-mcp/
 ├── internal/
-│   ├── mcp/               # dual transport + tool registration
-│   ├── fs/                # rooted filesystem
-│   ├── shell/             # run_command
-│   ├── git/               # status/diff/log
-│   └── config/            # flags
+│   ├── config/
+│   ├── fs/
+│   ├── git/
+│   ├── limitio/
+│   ├── mcp/
+│   ├── roots/
+│   └── shell/
 ├── deploy/
-│   ├── Caddyfile.example
-│   └── env.example
+├── web/terminal/
 ├── go.mod
+├── go.sum
 └── README.md
 ```
 
-## Implementation plan
+## Roadmap
 
-### Phase 0 — Foundations ✅
-- Go module + official `github.com/modelcontextprotocol/go-sdk` v1.7.0 (2026-07-28).
-- Dual transport: stdio + Streamable HTTP (`Stateless: true`).
-- `ping` + `/health`.
-
-### Phase 1 — Core local tools ✅
-- Rooted `read_file` / `write_file` / `list_dir`.
-- `run_command` with timeout.
-- `git_status` / `git_diff` / `git_log`.
-
-### Phase 2 — Persistent PTY + live streaming (next)
-- PTY manager, monotonic events, `terminal_*` tools.
-- Short-lived SSE for MCP App UI (parity with chatgpt-terminal-plugin).
-
-### Phase 3 — MCP App Terminal UI
-- Static UI embedded via `//go:embed`, live stream rendering.
-
-### Phase 4 — Computer use + advanced coding
-- Long-lived CDP, apply_patch, optional LSP.
-
-### Phase 5 — Production hardening
-- Device identity, profiles, audit, systemd, install script.
-
-## Status
-
-**Phase 0 + Phase 1 complete.** Dual-transport Go binary with rooted filesystem, shell, and git tools is in `main`. Next: Phase 2 PTY + live Terminal UI streaming.
+- **Phase 0 — Foundations:** complete; dual transport, `ping`, `/health`.
+- **Phase 1 — Core local tools:** complete; rooted filesystem, shell, and Git tools.
+- **Phase 2 — Persistent PTY + live streaming:** next.
+- **Phase 3 — MCP App terminal UI:** embed and connect the preview UI to live streams.
+- **Phase 4 — Computer use + advanced coding:** CDP, patching, optional LSP.
+- **Phase 5 — Additional production hardening:** richer identity/policy, audit, installer/systemd packaging.
 
 ## License
 
-TBD (recommend MIT or Apache-2.0).
+TBD.

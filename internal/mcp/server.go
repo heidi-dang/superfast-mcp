@@ -2,29 +2,39 @@ package mcpx
 
 import (
 	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/heidi-dang/superfast-mcp/internal/config"
 	"github.com/heidi-dang/superfast-mcp/internal/fs"
 	"github.com/heidi-dang/superfast-mcp/internal/git"
+	"github.com/heidi-dang/superfast-mcp/internal/roots"
 	"github.com/heidi-dang/superfast-mcp/internal/shell"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func NewServer(cfg *config.Config) *mcp.Server {
+func NewServer(cfg *config.Config) (*mcp.Server, error) {
+	rootSet, err := roots.New(cfg.Roots)
+	if err != nil {
+		return nil, err
+	}
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "superfast-mcp",
 		Version: cfg.Version,
 	}, nil)
 
-	fsSvc := fs.New(cfg.Roots)
-	shellSvc := shell.New(cfg.Roots)
-	gitSvc := git.New(cfg.Roots)
+	fsSvc := fs.New(rootSet)
+	shellSvc := shell.New(rootSet)
+	gitSvc := git.New(rootSet)
 
 	type pingArgs struct{}
 	type pingOut struct {
@@ -78,66 +88,146 @@ func NewServer(cfg *config.Config) *mcp.Server {
 		Description: "Show recent git log --oneline (default 10, max 50).",
 	}, gitSvc.Log)
 
-	return server
+	return server, nil
 }
 
 func RunStdio(cfg *config.Config) error {
-	server := NewServer(cfg)
-	log.Printf("superfast-mcp %s starting on stdio roots=%v", cfg.Version, cfg.Roots)
+	server, err := NewServer(cfg)
+	if err != nil {
+		return err
+	}
+	slog.Info("superfast-mcp starting on stdio", "version", cfg.Version, "roots", cfg.Roots)
 	return server.Run(context.Background(), &mcp.StdioTransport{})
 }
 
-func RunHTTP(cfg *config.Config) error {
-	server := NewServer(cfg)
-	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
+	if cfg.AuthToken == "" && !cfg.AllowUnauthenticatedHTTP {
+		return nil, fmt.Errorf("HTTP MCP requires bearer authentication; configure SUPERFAST_AUTH_TOKEN or explicitly allow unauthenticated HTTP")
+	}
+	server, err := NewServer(cfg)
+	if err != nil {
+		return nil, err
+	}
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{Stateless: true})
 
+	limitedMCP := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, 4*1024*1024)
+		}
+		mcpHandler.ServeHTTP(w, r)
+	})
+	protectedMCP := bearerAuth(cfg.AuthToken, limitedMCP)
+
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", handler)
-	mux.Handle("/mcp/", handler)
+	mux.Handle("/mcp", protectedMCP)
+	mux.Handle("/mcp/", protectedMCP)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"ok":true,"version":%q,"roots":%q}`, cfg.Version, strings.Join(cfg.Roots, ","))
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "version": cfg.Version})
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/plain")
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintf(w, "superfast-mcp %s\nMCP endpoint: /mcp\nHealth: /health\n", cfg.Version)
 	})
+	return mux, nil
+}
 
-	addr := cfg.HTTPAddr
-	if addr == "" {
-		addr = ":8787"
+func RunHTTP(cfg *config.Config) error {
+	if strings.TrimSpace(cfg.HTTPAddr) == "" {
+		return fmt.Errorf("HTTP listen address must not be empty")
+	}
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		return err
+	}
+
+	srv := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 	public := cfg.PublicURL
 	if public == "" {
-		public = "http://localhost" + addr
+		host := cfg.HTTPAddr
+		if strings.HasPrefix(host, ":") {
+			host = "localhost" + host
+		}
+		public = "http://" + host
 	}
-	log.Printf("superfast-mcp %s listening on %s  (public %s/mcp)  roots=%v", cfg.Version, addr, public, cfg.Roots)
-	return http.ListenAndServe(addr, mux)
+	slog.Info("superfast-mcp listening", "version", cfg.Version, "addr", cfg.HTTPAddr, "public", public+"/mcp", "roots", cfg.Roots, "authenticated", cfg.AuthToken != "")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	case <-signalCtx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	}
+}
+
+func bearerAuth(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Fields(r.Header.Get("Authorization"))
+		valid := len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") && subtle.ConstantTimeCompare([]byte(parts[1]), []byte(token)) == 1
+		if !valid {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="superfast-mcp"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func Run(cfg *config.Config) error {
 	if cfg.StdioOnly {
 		return RunStdio(cfg)
 	}
-	if cfg.HTTPOnly || cfg.HTTPAddr != "" {
-		if isStdioAttached() && !cfg.HTTPOnly {
-			return RunStdio(cfg)
-		}
+	if cfg.HTTPOnly {
 		return RunHTTP(cfg)
 	}
-	return RunStdio(cfg)
+	if strings.TrimSpace(cfg.HTTPAddr) == "" || isStdioPipe() {
+		return RunStdio(cfg)
+	}
+	return RunHTTP(cfg)
 }
 
-func isStdioAttached() bool {
-	fi, err := os.Stdin.Stat()
+func isStdioPipe() bool {
+	info, err := os.Stdin.Stat()
 	if err != nil {
 		return false
 	}
-	return (fi.Mode() & os.ModeCharDevice) == 0
+	return (info.Mode() & os.ModeCharDevice) == 0
 }

@@ -1,11 +1,11 @@
-# Example Caddyfile for superfast-mcp on an existing DNS domain.
-# Replace mcp.example.com with your domain and point the A/AAAA record at this host.
+# Replace mcp.example.com with the public hostname and point DNS at this host.
+# superfast-mcp should listen only on 127.0.0.1:8787 behind Caddy.
 
 mcp.example.com {
 	encode zstd gzip
 
-	# MCP Streamable HTTP endpoint (ChatGPT / Grok custom connector)
-	handle /mcp* {
+	@superfast_mcp path /mcp /mcp/*
+	handle @superfast_mcp {
 		reverse_proxy 127.0.0.1:8787 {
 			flush_interval -1
 		}

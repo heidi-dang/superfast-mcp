@@ -1,30 +1,40 @@
 package git
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/heidi-dang/superfast-mcp/internal/limitio"
+	"github.com/heidi-dang/superfast-mcp/internal/roots"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Service struct {
-	roots []string
+	roots *roots.Set
 }
 
-func New(roots []string) *Service {
-	return &Service{roots: roots}
+func New(rootSet *roots.Set) *Service {
+	return &Service{roots: rootSet}
 }
 
-func (s *Service) run(ctx context.Context, cwd string, args ...string) (string, string, int, error) {
+func (s *Service) run(ctx context.Context, path string, stdoutLimit int, args ...string) (string, string, string, int) {
+	cwd, err := s.roots.ResolveExistingDir(path)
+	if err != nil {
+		return "", err.Error(), "", -1
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
+	stdout := limitio.NewBuffer(stdoutLimit)
+	stderr := limitio.NewBuffer(32 * 1024)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err = cmd.Run()
 	code := 0
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
@@ -33,7 +43,13 @@ func (s *Service) run(ctx context.Context, cwd string, args ...string) (string, 
 			code = -1
 		}
 	}
-	return stdout.String(), stderr.String(), code, err
+	if ctx.Err() == context.DeadlineExceeded {
+		code = -1
+		if stderr.String() == "" {
+			return stdout.String(), "git command timed out", cwd, code
+		}
+	}
+	return stdout.String(), stderr.String(), cwd, code
 }
 
 type StatusArgs struct {
@@ -46,11 +62,7 @@ type StatusOut struct {
 }
 
 func (s *Service) Status(ctx context.Context, req *mcp.CallToolRequest, args StatusArgs) (*mcp.CallToolResult, StatusOut, error) {
-	cwd := args.Path
-	if cwd == "" && len(s.roots) > 0 {
-		cwd = s.roots[0]
-	}
-	stdout, stderr, code, _ := s.run(ctx, cwd, "status", "--porcelain=v1", "-b")
+	stdout, stderr, cwd, code := s.run(ctx, args.Path, 64*1024, "status", "--porcelain=v1", "-b")
 	text := stdout
 	if stderr != "" {
 		text += "\n" + stderr
@@ -76,27 +88,24 @@ type DiffOut struct {
 }
 
 func (s *Service) Diff(ctx context.Context, req *mcp.CallToolRequest, args DiffArgs) (*mcp.CallToolResult, DiffOut, error) {
-	cwd := args.Path
-	if cwd == "" && len(s.roots) > 0 {
-		cwd = s.roots[0]
-	}
 	gitArgs := []string{"diff"}
 	if args.Staged {
 		gitArgs = append(gitArgs, "--cached")
 	}
 	if args.Context > 0 {
-		gitArgs = append(gitArgs, fmt.Sprintf("-U%d", args.Context))
+		contextLines := args.Context
+		if contextLines > 100 {
+			contextLines = 100
+		}
+		gitArgs = append(gitArgs, fmt.Sprintf("-U%d", contextLines))
 	}
-	stdout, stderr, code, _ := s.run(ctx, cwd, gitArgs...)
+	stdout, stderr, cwd, code := s.run(ctx, args.Path, 100*1024, gitArgs...)
 	text := stdout
 	if text == "" && code == 0 {
 		text = "(no diff)"
 	}
 	if stderr != "" {
 		text += "\n" + stderr
-	}
-	if len(text) > 100*1024 {
-		text = text[:100*1024] + "\n...[truncated]"
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
@@ -115,10 +124,6 @@ type LogOut struct {
 }
 
 func (s *Service) Log(ctx context.Context, req *mcp.CallToolRequest, args LogArgs) (*mcp.CallToolResult, LogOut, error) {
-	cwd := args.Path
-	if cwd == "" && len(s.roots) > 0 {
-		cwd = s.roots[0]
-	}
 	n := args.Limit
 	if n <= 0 {
 		n = 10
@@ -126,7 +131,7 @@ func (s *Service) Log(ctx context.Context, req *mcp.CallToolRequest, args LogArg
 	if n > 50 {
 		n = 50
 	}
-	stdout, stderr, code, _ := s.run(ctx, cwd, "log", fmt.Sprintf("-%d", n), "--oneline", "--decorate")
+	stdout, stderr, cwd, code := s.run(ctx, args.Path, 64*1024, "log", fmt.Sprintf("-%d", n), "--oneline", "--decorate")
 	text := strings.TrimSpace(stdout)
 	if stderr != "" {
 		text += "\n" + stderr

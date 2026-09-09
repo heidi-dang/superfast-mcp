@@ -51,7 +51,7 @@ html, body {
 }
 .shell[data-state="live"] .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(61, 214, 140, 0.15); }
 .shell[data-state="reconnecting"] .dot { background: var(--warn); }
-.shell[data-state="failed"], .shell[data-state="offline"] .dot { background: var(--err); }
+.shell[data-state="failed"] .dot, .shell[data-state="offline"] .dot { background: var(--err); }
 
 .status {
   display: inline-flex;
