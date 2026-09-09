@@ -124,7 +124,7 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if cfg.AuthToken != "" && cfg.PublicURL != "" {
 		issuer := strings.TrimRight(cfg.PublicURL, "/")
-		oauthServer, err := oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken)
+		oauthServer, err := oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken, cfg.OAuthOwnerPassword)
 		if err != nil {
 			return nil, err
 		}

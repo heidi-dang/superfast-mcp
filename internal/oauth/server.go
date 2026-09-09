@@ -113,10 +113,11 @@ type authorizationPageData struct {
 	Error      string
 }
 
-func New(issuer, resource, masterToken string) (*Server, error) {
+func New(issuer, resource, masterToken, ownerPassword string) (*Server, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	resource = strings.TrimSpace(resource)
 	masterToken = strings.TrimSpace(masterToken)
+	ownerPassword = strings.TrimSpace(ownerPassword)
 	if issuer == "" || resource == "" {
 		return nil, fmt.Errorf("OAuth issuer and resource are required")
 	}
@@ -131,10 +132,13 @@ func New(issuer, resource, masterToken string) (*Server, error) {
 	if masterToken == "" {
 		return nil, fmt.Errorf("OAuth master token is required")
 	}
+	if ownerPassword == "" {
+		ownerPassword = OwnerPasswordFromToken(masterToken)
+	}
 	return &Server{
 		issuer:        issuer,
 		resource:      resource,
-		ownerPassword: OwnerPasswordFromToken(masterToken),
+		ownerPassword: ownerPassword,
 		signingKey:    derive(masterToken, signingKeyLabel),
 		codes:         make(map[string]authorizationGrant),
 		now:           time.Now,

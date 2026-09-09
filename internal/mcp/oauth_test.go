@@ -13,6 +13,50 @@ import (
 	"testing"
 )
 
+func TestHTTPHandlerUsesConfiguredOAuthOwnerPassword(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PublicURL = "https://superfast.example.com"
+	cfg.OAuthOwnerPassword = "configured-owner"
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	registration := `{"redirect_uris":["https://chatgpt.example/callback"],"client_name":"ChatGPT","grant_types":["authorization_code"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web"}`
+	registerReq := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(registration))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201; body=%s", registerRec.Code, registerRec.Body.String())
+	}
+	var registered struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registered); err != nil {
+		t.Fatal(err)
+	}
+
+	challengeBytes := sha256.Sum256([]byte(strings.Repeat("v", 64)))
+	authorizeQuery := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registered.ClientID},
+		"redirect_uri":          {"https://chatgpt.example/callback"},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challengeBytes[:])},
+		"code_challenge_method": {"S256"},
+		"resource":              {"https://superfast.example.com/mcp"},
+		"scope":                 {"mcp"},
+	}
+	authorizePath := "/authorize?" + authorizeQuery.Encode()
+	authorizeReq := httptest.NewRequest(http.MethodPost, authorizePath, strings.NewReader(url.Values{"owner_password": {"configured-owner"}}.Encode()))
+	authorizeReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	authorizeRec := httptest.NewRecorder()
+	handler.ServeHTTP(authorizeRec, authorizeReq)
+	if authorizeRec.Code != http.StatusSeeOther {
+		t.Fatalf("configured owner password status = %d, want 303; body=%s", authorizeRec.Code, authorizeRec.Body.String())
+	}
+}
+
 func TestHTTPHandlerOAuthAuthorizationCodeFlow(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.PublicURL = "https://superfast.example.com"

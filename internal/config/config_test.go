@@ -41,6 +41,18 @@ func TestParseArgsReadsDocumentedEnvironment(t *testing.T) {
 	}
 }
 
+func TestParseArgsReadsOAuthOwnerPasswordEnvironment(t *testing.T) {
+	cfg, err := ParseArgs([]string{"--allow-unauthenticated-http"}, envMap(map[string]string{
+		"SUPERFAST_OAUTH_OWNER_PASSWORD": "owner-secret",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthOwnerPassword != "owner-secret" {
+		t.Fatalf("OAuthOwnerPassword = %q, want owner-secret", cfg.OAuthOwnerPassword)
+	}
+}
+
 func TestParseArgsRejectsConflictingTransports(t *testing.T) {
 	_, err := ParseArgs([]string{"--stdio-only", "--http-only"}, envMap(map[string]string{"SUPERFAST_AUTH_TOKEN": "secret"}))
 	if err == nil {

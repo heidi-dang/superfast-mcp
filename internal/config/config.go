@@ -16,6 +16,7 @@ type Config struct {
 	HTTPOnly                 bool
 	LogJSON                  bool
 	AuthToken                string
+	OAuthOwnerPassword       string
 	AllowUnauthenticatedHTTP bool
 	Version                  string
 }
@@ -49,8 +50,9 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		HTTPOnly:                 httpOnly,
 		LogJSON:                  logJSON,
 		AuthToken:                strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN")),
+		OAuthOwnerPassword:       strings.TrimSpace(getenv("SUPERFAST_OAUTH_OWNER_PASSWORD")),
 		AllowUnauthenticatedHTTP: allowUnauthenticated,
-		Version:                  "0.1.2",
+		Version:                  "0.1.3",
 	}
 	rootsValue := getenv("SUPERFAST_ROOTS")
 	authTokenFile := strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN_FILE"))

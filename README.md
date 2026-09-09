@@ -66,7 +66,7 @@ export SUPERFAST_AUTH_TOKEN="$(openssl rand -hex 32)"
 ./superfast-mcp
 ```
 
-Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. OAuth-capable MCP clients discover the protected resource and authorization server from the standard `/.well-known/` endpoints, register as public clients, and use PKCE-S256. The authorization page requires the server owner's derived authorization password before issuing a code. Access tokens are resource-bound and expire after one hour; refresh tokens are issued when `offline_access` is requested.
+Put a TLS reverse proxy such as Caddy in front of `127.0.0.1:8787`; see `deploy/Caddyfile.example`. OAuth-capable MCP clients discover the protected resource and authorization server from the standard `/.well-known/` endpoints, register as public clients, and use PKCE-S256. The authorization page requires the server owner's authorization password before issuing a code. Set `SUPERFAST_OAUTH_OWNER_PASSWORD` to choose that password explicitly; when unset, the server derives it from the master bearer token for backward compatibility. Access tokens are resource-bound and expire after one hour; refresh tokens are issued when `offline_access` is requested.
 
 Static clients can still send `Authorization: Bearer <token>` directly. For production, keep the master token outside shell history and source control. `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` can load it from a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
 
@@ -84,6 +84,7 @@ Supported variables:
 - `SUPERFAST_LOG_JSON`
 - `SUPERFAST_AUTH_TOKEN`
 - `SUPERFAST_AUTH_TOKEN_FILE`
+- `SUPERFAST_OAUTH_OWNER_PASSWORD`
 - `SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP`
 
 See `deploy/env.example` for a production-oriented baseline.
