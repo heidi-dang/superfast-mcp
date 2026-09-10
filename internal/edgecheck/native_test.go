@@ -18,18 +18,19 @@ func TestCheckNativeQualifiesAWSParityContract(t *testing.T) {
 	mux.HandleFunc("/.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"issuer":                                server.URL,
-			"authorization_endpoint":                server.URL + "/oauth/authorize",
-			"token_endpoint":                        server.URL + "/oauth/token",
-			"registration_endpoint":                 server.URL + "/oauth/register",
-			"revocation_endpoint":                   server.URL + "/oauth/revoke",
-			"response_types_supported":              []string{"code"},
-			"response_modes_supported":              []string{"query"},
-			"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-			"token_endpoint_auth_methods_supported": []string{"none"},
-			"code_challenge_methods_supported":      []string{"S256"},
-			"client_id_metadata_document_supported": true,
-			"protected_resources":                   []string{server.URL + "/mcp"},
+			"issuer":                                         server.URL,
+			"authorization_endpoint":                         server.URL + "/oauth/authorize",
+			"token_endpoint":                                 server.URL + "/oauth/token",
+			"registration_endpoint":                          server.URL + "/oauth/register",
+			"revocation_endpoint":                            server.URL + "/oauth/revoke",
+			"response_types_supported":                       []string{"code"},
+			"response_modes_supported":                       []string{"query"},
+			"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
+			"token_endpoint_auth_methods_supported":          []string{"none"},
+			"code_challenge_methods_supported":               []string{"S256"},
+			"client_id_metadata_document_supported":          true,
+			"authorization_response_iss_parameter_supported": true,
+			"protected_resources":                            []string{server.URL + "/mcp"},
 		})
 	})
 	mux.HandleFunc("/oauth/register", func(w http.ResponseWriter, r *http.Request) {

@@ -140,6 +140,9 @@ func TestNativeOAuthMetadataMatchesAWSParity(t *testing.T) {
 	if metadata["client_id_metadata_document_supported"] != true {
 		t.Fatalf("CIMD support=%v", metadata["client_id_metadata_document_supported"])
 	}
+	if metadata["authorization_response_iss_parameter_supported"] != true {
+		t.Fatalf("RFC 9207 iss support=%v", metadata["authorization_response_iss_parameter_supported"])
+	}
 	for _, key := range []string{"response_modes_supported", "grant_types_supported", "token_endpoint_auth_methods_supported", "code_challenge_methods_supported", "protected_resources", "scopes_supported"} {
 		if _, ok := metadata[key]; !ok {
 			t.Fatalf("metadata missing %s: %v", key, metadata)

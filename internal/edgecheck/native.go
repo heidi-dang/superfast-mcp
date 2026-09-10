@@ -40,6 +40,7 @@ type nativeAuthorizationMetadata struct {
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported"`
 	CodeChallengeMethodsSupported     []string `json:"code_challenge_methods_supported"`
 	ClientIDMetadataDocumentSupported bool     `json:"client_id_metadata_document_supported"`
+	AuthorizationResponseISSSupported bool     `json:"authorization_response_iss_parameter_supported"`
 	ProtectedResources                []string `json:"protected_resources"`
 }
 
@@ -99,7 +100,7 @@ func CheckNative(ctx context.Context, client *http.Client, opts NativeOptions) (
 	if !slices.Contains(metadata.ResponseTypesSupported, "code") || !slices.Contains(metadata.ResponseModesSupported, "query") ||
 		!slices.Contains(metadata.GrantTypesSupported, "authorization_code") || !slices.Contains(metadata.GrantTypesSupported, "refresh_token") ||
 		!slices.Contains(metadata.TokenEndpointAuthMethodsSupported, "none") || !slices.Contains(metadata.CodeChallengeMethodsSupported, "S256") ||
-		!metadata.ClientIDMetadataDocumentSupported || !slices.Contains(metadata.ProtectedResources, resource) {
+		!metadata.ClientIDMetadataDocumentSupported || !metadata.AuthorizationResponseISSSupported || !slices.Contains(metadata.ProtectedResources, resource) {
 		return NativeResult{}, fmt.Errorf("native authorization metadata is missing AWS-parity capabilities")
 	}
 	if err := probeInvalidRefreshToken(ctx, client, metadata.TokenEndpoint); err != nil {

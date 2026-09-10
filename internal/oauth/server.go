@@ -234,18 +234,19 @@ func (s *Server) handleAuthorizationServerMetadata(w http.ResponseWriter, r *htt
 		return
 	}
 	body := map[string]any{
-		"issuer":                                s.issuer,
-		"authorization_endpoint":                s.issuer + "/oauth/authorize",
-		"token_endpoint":                        s.issuer + "/oauth/token",
-		"registration_endpoint":                 s.issuer + "/oauth/register",
-		"revocation_endpoint":                   s.issuer + "/oauth/revoke",
-		"response_types_supported":              []string{"code"},
-		"response_modes_supported":              []string{"query"},
-		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-		"token_endpoint_auth_methods_supported": []string{"none"},
-		"code_challenge_methods_supported":      []string{"S256"},
-		"client_id_metadata_document_supported": true,
-		"protected_resources":                   []string{s.resource},
+		"issuer":                                         s.issuer,
+		"authorization_endpoint":                         s.issuer + "/oauth/authorize",
+		"token_endpoint":                                 s.issuer + "/oauth/token",
+		"registration_endpoint":                          s.issuer + "/oauth/register",
+		"revocation_endpoint":                            s.issuer + "/oauth/revoke",
+		"response_types_supported":                       []string{"code"},
+		"response_modes_supported":                       []string{"query"},
+		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
+		"token_endpoint_auth_methods_supported":          []string{"none"},
+		"code_challenge_methods_supported":               []string{"S256"},
+		"client_id_metadata_document_supported":          true,
+		"authorization_response_iss_parameter_supported": true,
+		"protected_resources":                            []string{s.resource},
 	}
 	if len(s.scopes) > 0 {
 		body["scopes_supported"] = append([]string(nil), s.scopes...)
