@@ -88,7 +88,9 @@ Set `SUPERFAST_EDGE_ACCESS_TOKEN` only when performing the authenticated phase; 
 
 ### Native OAuth fallback — AWS parity
 
-The origin also exposes an independent native OAuth 2.1 fallback at `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server`, and `/oauth/{register,authorize,login,token,revoke}`. Enable it with `SUPERFAST_NATIVE_OAUTH_SECRET` and `SUPERFAST_NATIVE_OAUTH_DB` plus the complete Cloudflare Access settings above. The native flow uses signed DCR client metadata, PKCE S256, resource-bound access JWTs, durable one-time authorization codes, rotating refresh-token families, revocation, and Client ID Metadata Documents.
+The origin also exposes an independent native OAuth 2.1 fallback at `/oauth/{register,authorize,login,token,revoke}`. Enable it with `SUPERFAST_NATIVE_OAUTH_SECRET` and `SUPERFAST_NATIVE_OAUTH_DB` plus the complete Cloudflare Access settings above. The native flow uses signed DCR client metadata, PKCE S256, resource-bound access JWTs, durable one-time authorization codes, rotating refresh-token families, revocation, and Client ID Metadata Documents.
+
+`SUPERFAST_NATIVE_OAUTH_ADVERTISE` controls whether the origin also publishes native discovery metadata at `/.well-known/oauth-protected-resource[/mcp]` and `/.well-known/oauth-authorization-server`. Keep it `false` (default) after Cloudflare Access Managed OAuth cutover so Cloudflare owns public discovery/challenge. Set it to `true` only for rollback or native-origin edge-check validation.
 
 `/oauth/login` does not use the legacy owner-password form. It requires a valid Cloudflare Access assertion and then presents explicit approve/deny consent. Store `SUPERFAST_NATIVE_OAUTH_DB` under a protected service-writable path such as `/var/lib/superfast-mcp/oauth/state.db`, never beneath an MCP-readable workspace root. Keep `SUPERFAST_NATIVE_OAUTH_SECRET` outside source control.
 
@@ -116,6 +118,7 @@ Supported variables:
 - `SUPERFAST_NATIVE_OAUTH_SCOPES`
 - `SUPERFAST_NATIVE_OAUTH_SECRET`
 - `SUPERFAST_NATIVE_OAUTH_DB`
+- `SUPERFAST_NATIVE_OAUTH_ADVERTISE` (default `false`; enable only for rollback/native-origin checks)
 - `SUPERFAST_CF_ACCESS_ISSUER`
 - `SUPERFAST_CF_ACCESS_AUDIENCE`
 - `SUPERFAST_CF_ACCESS_ALLOWED_EMAIL`

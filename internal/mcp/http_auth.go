@@ -39,7 +39,7 @@ func authenticateMCP(options mcpAuthOptions, next http.Handler) http.Handler {
 		}
 
 		challenge := `Bearer realm="superfast-mcp"`
-		if options.NativeOAuth != nil {
+		if options.NativeOAuth != nil && options.Access == nil {
 			challenge = fmt.Sprintf(`Bearer realm="superfast-mcp", resource_metadata=%q, scope="mcp"`, options.NativeOAuth.ResourceMetadataURL())
 		}
 		w.Header().Set("WWW-Authenticate", challenge)

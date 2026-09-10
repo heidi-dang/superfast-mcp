@@ -95,6 +95,28 @@ func TestParseArgsReadsNativeOAuthConfiguration(t *testing.T) {
 	if cfg.NativeOAuth.StateDB != "/var/lib/superfast-mcp/oauth/state.db" {
 		t.Fatalf("StateDB=%q", cfg.NativeOAuth.StateDB)
 	}
+	if cfg.NativeOAuth.AdvertiseNativeMetadata {
+		t.Fatal("AdvertiseNativeMetadata=true, want false by default")
+	}
+}
+
+func TestParseArgsReadsNativeOAuthMetadataAdvertisementFlag(t *testing.T) {
+	cfg, err := ParseArgs([]string{"--http-only"}, envMap(map[string]string{
+		"SUPERFAST_PUBLIC_URL":                 "https://superfast.example.com",
+		"SUPERFAST_CF_ACCESS_ISSUER":           "https://team.cloudflareaccess.com",
+		"SUPERFAST_CF_ACCESS_AUDIENCE":         "app-aud",
+		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL":    "owner@example.com",
+		"SUPERFAST_NATIVE_OAUTH_SECRET":        strings.Repeat("s", 32),
+		"SUPERFAST_NATIVE_OAUTH_DB":            "/var/lib/superfast-mcp/oauth/state.db",
+		"SUPERFAST_NATIVE_OAUTH_ADVERTISE":     "true",
+		"SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP": "true",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NativeOAuth == nil || !cfg.NativeOAuth.AdvertiseNativeMetadata {
+		t.Fatalf("AdvertiseNativeMetadata=%v, want true", cfg.NativeOAuth != nil && cfg.NativeOAuth.AdvertiseNativeMetadata)
+	}
 }
 
 func TestParseArgsRejectsNativeOAuthWithoutCloudflareLoginIdentity(t *testing.T) {

@@ -19,11 +19,12 @@ type CloudflareAccessConfig struct {
 }
 
 type NativeOAuthConfig struct {
-	Issuer   string
-	Resource string
-	Scopes   []string
-	Secret   string
-	StateDB  string
+	Issuer                  string
+	Resource                string
+	Scopes                  []string
+	Secret                  string
+	StateDB                 string
+	AdvertiseNativeMetadata bool
 }
 
 type Config struct {
@@ -59,6 +60,10 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		return nil, err
 	}
 	allowUnauthenticated, err := envBool(getenv, "SUPERFAST_ALLOW_UNAUTHENTICATED_HTTP")
+	if err != nil {
+		return nil, err
+	}
+	advertiseNativeMetadata, err := envBool(getenv, "SUPERFAST_NATIVE_OAUTH_ADVERTISE")
 	if err != nil {
 		return nil, err
 	}
@@ -222,11 +227,12 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 			scopes = []string{"mcp"}
 		}
 		c.NativeOAuth = &NativeOAuthConfig{
-			Issuer:   issuer,
-			Resource: resource,
-			Scopes:   scopes,
-			Secret:   secret,
-			StateDB:  stateDB,
+			Issuer:                  issuer,
+			Resource:                resource,
+			Scopes:                  scopes,
+			Secret:                  secret,
+			StateDB:                 stateDB,
+			AdvertiseNativeMetadata: advertiseNativeMetadata,
 		}
 	}
 
