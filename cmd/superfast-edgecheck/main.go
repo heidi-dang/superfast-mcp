@@ -42,6 +42,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if nativeOrigin := strings.TrimSpace(os.Getenv("SUPERFAST_EDGE_NATIVE_ORIGIN")); nativeOrigin != "" {
+		nativeResult, nativeErr := edgecheck.CheckNative(context.Background(), nil, edgecheck.NativeOptions{
+			Origin:          nativeOrigin,
+			Resource:        mcpURL,
+			ChatGPTRedirect: redirect,
+			Timeout:         timeout,
+		})
+		if nativeErr != nil {
+			return nativeErr
+		}
+		fmt.Printf("superfast native oauth verified: issuer=%s application_type=%s revoke=%t cimd=%t\n", nativeResult.Issuer, nativeResult.DCRApplicationType, nativeResult.RevocationAdvertised, nativeResult.CIMDSupported)
+	}
 	tools := "unchecked"
 	if result.ToolCount >= 0 {
 		tools = strconv.Itoa(result.ToolCount)

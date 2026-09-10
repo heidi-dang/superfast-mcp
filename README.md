@@ -54,11 +54,11 @@ Example local MCP client configuration:
 
 ## Remote HTTP
 
-Remote HTTP fails closed unless authentication is configured or unauthenticated mode is explicitly requested. The release supports two authentication modes during the Cloudflare migration.
+Remote HTTP fails closed unless authentication is configured or unauthenticated mode is explicitly requested. Production uses the same dual-layer OAuth architecture as the stable AWS reference.
 
-### Cloudflare managed mode — recommended for production
+### Cloudflare Managed OAuth — public ChatGPT path
 
-Cloudflare Access owns the public OAuth flow and the externally observed `/mcp` `WWW-Authenticate` challenge. The Go origin does not trust the Cloudflare header by itself: it validates `Cf-Access-Jwt-Assertion` with the configured Access issuer, application audience, owner identity, JWKS, signature, and JWT time claims, plus resource/scope restrictions when those claims are intentionally used. The existing static bearer remains available as an origin/break-glass path, and native OAuth is retained temporarily for rollback.
+Cloudflare Access owns the public OAuth flow and the externally observed `/mcp` `WWW-Authenticate` challenge. The Go origin does not trust the forwarded Cloudflare header by itself: it validates `Cf-Access-Jwt-Assertion` with the configured Access issuer, application audience, owner identity, JWKS, signature, and JWT time claims, plus resource/scope restrictions only when those claims are intentionally used. The existing static bearer remains available as an origin/break-glass path.
 
 Example origin configuration, using placeholders only:
 
@@ -86,11 +86,13 @@ SUPERFAST_EDGE_MCP_URL=https://superfast.heidiai.com.au/mcp \
 
 Set `SUPERFAST_EDGE_ACCESS_TOKEN` only when performing the authenticated phase; the command uses it solely as a Bearer header and never prints it. A successful authenticated check requires exactly the eight tools documented above.
 
-### Native rollback mode
+### Native OAuth fallback — AWS parity
 
-When `SUPERFAST_PUBLIC_URL` and `SUPERFAST_AUTH_TOKEN` are both set, the Go server still exposes its existing RFC 9728 protected-resource metadata, Dynamic Client Registration, PKCE-S256 authorization-code flow, token endpoint, and refresh tokens. This path is retained temporarily for rollback and origin qualification; it is **not** the recommended ChatGPT production OAuth path after Cloudflare Access cutover.
+The origin also exposes an independent native OAuth 2.1 fallback at `/.well-known/oauth-protected-resource[/mcp]`, `/.well-known/oauth-authorization-server`, and `/oauth/{register,authorize,login,token,revoke}`. Enable it with `SUPERFAST_NATIVE_OAUTH_SECRET` and `SUPERFAST_NATIVE_OAUTH_DB` plus the complete Cloudflare Access settings above. The native flow uses signed DCR client metadata, PKCE S256, resource-bound access JWTs, durable one-time authorization codes, rotating refresh-token families, revocation, and Client ID Metadata Documents.
 
-The native authorization page requires the server owner's authorization password before issuing a code. Set `SUPERFAST_OAUTH_OWNER_PASSWORD` explicitly or allow the server to derive a separate owner password from the master bearer token for backward compatibility.
+`/oauth/login` does not use the legacy owner-password form. It requires a valid Cloudflare Access assertion and then presents explicit approve/deny consent. Store `SUPERFAST_NATIVE_OAUTH_DB` under a protected service-writable path such as `/var/lib/superfast-mcp/oauth/state.db`, never beneath an MCP-readable workspace root. Keep `SUPERFAST_NATIVE_OAUTH_SECRET` outside source control.
+
+Qualify the native origin contract independently by setting `SUPERFAST_EDGE_NATIVE_ORIGIN` when running `superfast-edgecheck`; the public Managed OAuth check remains unchanged.
 
 Static clients can still send `Authorization: Bearer <token>` directly. Keep the master token outside shell history and source control; prefer `--auth-token-file` or `SUPERFAST_AUTH_TOKEN_FILE` with a permission-restricted file. `/health` intentionally remains public and reports only health/version; `/mcp` is protected.
 
@@ -108,7 +110,12 @@ Supported variables:
 - `SUPERFAST_LOG_JSON`
 - `SUPERFAST_AUTH_TOKEN`
 - `SUPERFAST_AUTH_TOKEN_FILE`
-- `SUPERFAST_OAUTH_OWNER_PASSWORD`
+- `SUPERFAST_OAUTH_OWNER_PASSWORD` (deprecated compatibility setting)
+- `SUPERFAST_NATIVE_OAUTH_ISSUER`
+- `SUPERFAST_NATIVE_OAUTH_RESOURCE`
+- `SUPERFAST_NATIVE_OAUTH_SCOPES`
+- `SUPERFAST_NATIVE_OAUTH_SECRET`
+- `SUPERFAST_NATIVE_OAUTH_DB`
 - `SUPERFAST_CF_ACCESS_ISSUER`
 - `SUPERFAST_CF_ACCESS_AUDIENCE`
 - `SUPERFAST_CF_ACCESS_ALLOWED_EMAIL`
