@@ -18,6 +18,14 @@ type CloudflareAccessConfig struct {
 	RequiredScopes []string
 }
 
+type NativeOAuthConfig struct {
+	Issuer   string
+	Resource string
+	Scopes   []string
+	Secret   string
+	StateDB  string
+}
+
 type Config struct {
 	HTTPAddr                 string
 	PublicURL                string
@@ -30,6 +38,7 @@ type Config struct {
 	AllowUnauthenticatedHTTP bool
 	Version                  string
 	CloudflareAccess         *CloudflareAccessConfig
+	NativeOAuth              *NativeOAuthConfig
 }
 
 func Parse() (*Config, error) {
@@ -63,7 +72,7 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		AuthToken:                strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN")),
 		OAuthOwnerPassword:       strings.TrimSpace(getenv("SUPERFAST_OAUTH_OWNER_PASSWORD")),
 		AllowUnauthenticatedHTTP: allowUnauthenticated,
-		Version:                  "0.2.1",
+		Version:                  "0.3.0",
 	}
 	rootsValue := getenv("SUPERFAST_ROOTS")
 	authTokenFile := strings.TrimSpace(getenv("SUPERFAST_AUTH_TOKEN_FILE"))
@@ -94,10 +103,6 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		}
 		c.AuthToken = strings.TrimSpace(string(data))
 	}
-	if c.AuthToken == "" && !c.AllowUnauthenticatedHTTP && c.HTTPOnly {
-		return nil, fmt.Errorf("HTTP mode requires SUPERFAST_AUTH_TOKEN or --auth-token-file; use --allow-unauthenticated-http only for intentionally unprotected deployments")
-	}
-
 	for _, root := range strings.Split(rootsValue, ",") {
 		root = strings.TrimSpace(root)
 		if root != "" {
@@ -175,7 +180,84 @@ func ParseArgs(args []string, getenv func(string) string) (*Config, error) {
 		}
 	}
 
+	rawNativeIssuer := getenv("SUPERFAST_NATIVE_OAUTH_ISSUER")
+	rawNativeResource := getenv("SUPERFAST_NATIVE_OAUTH_RESOURCE")
+	rawNativeScopes := getenv("SUPERFAST_NATIVE_OAUTH_SCOPES")
+	rawNativeSecret := getenv("SUPERFAST_NATIVE_OAUTH_SECRET")
+	rawNativeDB := getenv("SUPERFAST_NATIVE_OAUTH_DB")
+	if rawNativeIssuer != "" || rawNativeResource != "" || rawNativeScopes != "" || rawNativeSecret != "" || rawNativeDB != "" {
+		if c.PublicURL == "" {
+			return nil, fmt.Errorf("missing SUPERFAST_PUBLIC_URL required by native OAuth")
+		}
+		if c.CloudflareAccess == nil {
+			return nil, fmt.Errorf("native OAuth requires complete Cloudflare Access configuration for /oauth/login")
+		}
+		secret := strings.TrimSpace(rawNativeSecret)
+		if len(secret) < 32 {
+			return nil, fmt.Errorf("native OAuth secret must be at least 32 characters")
+		}
+		stateDB := strings.TrimSpace(rawNativeDB)
+		if stateDB == "" {
+			return nil, fmt.Errorf("native OAuth state database path is required")
+		}
+		issuer := strings.TrimRight(strings.TrimSpace(rawNativeIssuer), "/")
+		if issuer == "" {
+			issuer = c.PublicURL
+		}
+		if err := validateAbsoluteHTTPS(issuer, "native OAuth issuer"); err != nil {
+			return nil, err
+		}
+		resource := strings.TrimSpace(rawNativeResource)
+		if resource == "" {
+			resource = c.PublicURL + "/mcp"
+		}
+		if err := validateAbsoluteHTTPS(resource, "native OAuth resource"); err != nil {
+			return nil, err
+		}
+		scopes, err := parseScopeList(rawNativeScopes)
+		if err != nil {
+			return nil, fmt.Errorf("invalid native OAuth scopes: %w", err)
+		}
+		if len(scopes) == 0 {
+			scopes = []string{"mcp"}
+		}
+		c.NativeOAuth = &NativeOAuthConfig{
+			Issuer:   issuer,
+			Resource: resource,
+			Scopes:   scopes,
+			Secret:   secret,
+			StateDB:  stateDB,
+		}
+	}
+
+	if c.AuthToken == "" && c.CloudflareAccess == nil && c.NativeOAuth == nil && !c.AllowUnauthenticatedHTTP && c.HTTPOnly {
+		return nil, fmt.Errorf("HTTP mode requires static bearer, Cloudflare Access, or native OAuth authentication; use --allow-unauthenticated-http only for intentionally unprotected deployments")
+	}
+
 	return c, nil
+}
+
+func parseScopeList(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	seen := make(map[string]struct{})
+	var scopes []string
+	for _, commaPart := range strings.Split(raw, ",") {
+		commaPart = strings.TrimSpace(commaPart)
+		if commaPart == "" {
+			return nil, fmt.Errorf("empty scope entry")
+		}
+		for _, scope := range strings.Fields(commaPart) {
+			if _, ok := seen[scope]; ok {
+				continue
+			}
+			seen[scope] = struct{}{}
+			scopes = append(scopes, scope)
+		}
+	}
+	return scopes, nil
 }
 
 func validateAbsoluteHTTPS(rawURL, fieldName string) error {

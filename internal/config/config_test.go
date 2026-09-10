@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -15,8 +17,8 @@ func TestCurrentVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Version != "0.2.1" {
-		t.Fatalf("version=%q, want 0.2.1", cfg.Version)
+	if cfg.Version != "0.3.0" {
+		t.Fatalf("version=%q, want 0.3.0", cfg.Version)
 	}
 }
 
@@ -60,6 +62,78 @@ func TestParseArgsReadsOAuthOwnerPasswordEnvironment(t *testing.T) {
 	}
 	if cfg.OAuthOwnerPassword != "owner-secret" {
 		t.Fatalf("OAuthOwnerPassword = %q, want owner-secret", cfg.OAuthOwnerPassword)
+	}
+}
+
+func TestParseArgsReadsNativeOAuthConfiguration(t *testing.T) {
+	cfg, err := ParseArgs([]string{"--http-only"}, envMap(map[string]string{
+		"SUPERFAST_PUBLIC_URL":              "https://superfast.example.com",
+		"SUPERFAST_CF_ACCESS_ISSUER":        "https://team.cloudflareaccess.com",
+		"SUPERFAST_CF_ACCESS_AUDIENCE":      "app-aud",
+		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL": "owner@example.com",
+		"SUPERFAST_NATIVE_OAUTH_SECRET":     strings.Repeat("s", 32),
+		"SUPERFAST_NATIVE_OAUTH_DB":         "/var/lib/superfast-mcp/oauth/state.db",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NativeOAuth == nil {
+		t.Fatal("missing native OAuth config")
+	}
+	if cfg.NativeOAuth.Issuer != "https://superfast.example.com" {
+		t.Fatalf("Issuer=%q", cfg.NativeOAuth.Issuer)
+	}
+	if cfg.NativeOAuth.Resource != "https://superfast.example.com/mcp" {
+		t.Fatalf("Resource=%q", cfg.NativeOAuth.Resource)
+	}
+	if !slices.Equal(cfg.NativeOAuth.Scopes, []string{"mcp"}) {
+		t.Fatalf("Scopes=%v", cfg.NativeOAuth.Scopes)
+	}
+	if cfg.NativeOAuth.Secret != strings.Repeat("s", 32) {
+		t.Fatal("native OAuth secret was not preserved")
+	}
+	if cfg.NativeOAuth.StateDB != "/var/lib/superfast-mcp/oauth/state.db" {
+		t.Fatalf("StateDB=%q", cfg.NativeOAuth.StateDB)
+	}
+}
+
+func TestParseArgsRejectsNativeOAuthWithoutCloudflareLoginIdentity(t *testing.T) {
+	_, err := ParseArgs([]string{"--http-only"}, envMap(map[string]string{
+		"SUPERFAST_AUTH_TOKEN":          "break-glass",
+		"SUPERFAST_PUBLIC_URL":          "https://superfast.example.com",
+		"SUPERFAST_NATIVE_OAUTH_SECRET": strings.Repeat("s", 32),
+		"SUPERFAST_NATIVE_OAUTH_DB":     "/var/lib/superfast-mcp/oauth/state.db",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "Cloudflare Access") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestParseArgsRejectsWeakOrPartialNativeOAuthConfiguration(t *testing.T) {
+	base := map[string]string{
+		"SUPERFAST_AUTH_TOKEN":              "break-glass",
+		"SUPERFAST_PUBLIC_URL":              "https://superfast.example.com",
+		"SUPERFAST_CF_ACCESS_ISSUER":        "https://team.cloudflareaccess.com",
+		"SUPERFAST_CF_ACCESS_AUDIENCE":      "app-aud",
+		"SUPERFAST_CF_ACCESS_ALLOWED_EMAIL": "owner@example.com",
+	}
+	cases := []map[string]string{
+		{"SUPERFAST_NATIVE_OAUTH_SECRET": "short", "SUPERFAST_NATIVE_OAUTH_DB": "/var/lib/superfast-mcp/oauth/state.db"},
+		{"SUPERFAST_NATIVE_OAUTH_SECRET": strings.Repeat("s", 32)},
+		{"SUPERFAST_NATIVE_OAUTH_DB": "/var/lib/superfast-mcp/oauth/state.db"},
+		{"SUPERFAST_NATIVE_OAUTH_SECRET": strings.Repeat("s", 32), "SUPERFAST_NATIVE_OAUTH_DB": "/var/lib/superfast-mcp/oauth/state.db", "SUPERFAST_NATIVE_OAUTH_ISSUER": "http://bad.example.com"},
+	}
+	for i, extra := range cases {
+		env := make(map[string]string, len(base)+len(extra))
+		for k, v := range base {
+			env[k] = v
+		}
+		for k, v := range extra {
+			env[k] = v
+		}
+		if _, err := ParseArgs([]string{"--http-only"}, envMap(env)); err == nil {
+			t.Fatalf("case %d: expected native OAuth config rejection", i)
+		}
 	}
 }
 
