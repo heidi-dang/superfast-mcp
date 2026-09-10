@@ -101,9 +101,29 @@ func RunStdio(cfg *config.Config) error {
 	return server.Run(context.Background(), &mcp.StdioTransport{})
 }
 
-func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
-	if cfg.AuthToken == "" && cfg.CloudflareAccess == nil && !cfg.AllowUnauthenticatedHTTP {
-		return nil, fmt.Errorf("HTTP MCP requires authentication; configure SUPERFAST_AUTH_TOKEN or Cloudflare Access, or explicitly allow unauthenticated HTTP")
+type HTTPHandler struct {
+	handler     http.Handler
+	nativeOAuth *oauthserver.Server
+}
+
+func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.handler.ServeHTTP(w, r)
+}
+
+func (h *HTTPHandler) Close() error {
+	if h == nil || h.nativeOAuth == nil {
+		return nil
+	}
+	return h.nativeOAuth.Close()
+}
+
+func NewHTTPHandler(cfg *config.Config) (*HTTPHandler, error) {
+	return newHTTPHandler(cfg, nil)
+}
+
+func newHTTPHandler(cfg *config.Config, injectedAccessVerifier access.Verifier) (*HTTPHandler, error) {
+	if cfg.AuthToken == "" && cfg.CloudflareAccess == nil && cfg.NativeOAuth == nil && !cfg.AllowUnauthenticatedHTTP {
+		return nil, fmt.Errorf("HTTP MCP requires authentication; configure static bearer, Cloudflare Access, or native OAuth, or explicitly allow unauthenticated HTTP")
 	}
 	server, err := NewServer(cfg)
 	if err != nil {
@@ -120,8 +140,8 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 		mcpHandler.ServeHTTP(w, r)
 	})
 
-	var accessVerifier access.Verifier
-	if cfg.CloudflareAccess != nil {
+	accessVerifier := injectedAccessVerifier
+	if cfg.CloudflareAccess != nil && accessVerifier == nil {
 		accessVerifier, err = access.NewVerifier(*cfg.CloudflareAccess, nil)
 		if err != nil {
 			return nil, fmt.Errorf("configure Cloudflare Access verifier: %w", err)
@@ -130,13 +150,34 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 
 	mux := http.NewServeMux()
 	var nativeOAuth *oauthserver.Server
-	if cfg.AuthToken != "" && cfg.PublicURL != "" {
-		issuer := strings.TrimRight(cfg.PublicURL, "/")
-		nativeOAuth, err = oauthserver.New(issuer, issuer+"/mcp", cfg.AuthToken, cfg.OAuthOwnerPassword)
-		if err != nil {
-			return nil, err
+	if cfg.NativeOAuth != nil {
+		if cfg.CloudflareAccess == nil || accessVerifier == nil {
+			return nil, fmt.Errorf("native OAuth requires Cloudflare Access verification for /oauth/login")
 		}
-		nativeOAuth.RegisterRoutes(mux)
+		nativeOAuth, err = oauthserver.New(oauthserver.ServerConfig{
+			Issuer:   cfg.NativeOAuth.Issuer,
+			Resource: cfg.NativeOAuth.Resource,
+			Scopes:   cfg.NativeOAuth.Scopes,
+			Secret:   cfg.NativeOAuth.Secret,
+			StateDB:  cfg.NativeOAuth.StateDB,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("configure native OAuth server: %w", err)
+		}
+		nativeOAuth.RegisterProtocolRoutes(mux)
+		mux.HandleFunc("/oauth/login", func(w http.ResponseWriter, r *http.Request) {
+			assertion := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
+			if assertion == "" {
+				writeAccessLoginUnauthorized(w)
+				return
+			}
+			identity, verifyErr := accessVerifier.Verify(r.Context(), assertion)
+			if verifyErr != nil {
+				writeAccessLoginUnauthorized(w)
+				return
+			}
+			nativeOAuth.HandleLogin(w, r, oauthserver.Identity{Subject: identity.Subject, Email: identity.Email})
+		})
 	}
 
 	protectedMCP := http.Handler(limitedMCP)
@@ -172,10 +213,18 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintf(w, "superfast-mcp %s\nMCP endpoint: /mcp\nHealth: /health\n", cfg.Version)
 	})
+	handler := http.Handler(mux)
 	if cfg.LogJSON {
-		return requestTelemetry(mux), nil
+		handler = requestTelemetry(handler)
 	}
-	return mux, nil
+	return &HTTPHandler{handler: handler, nativeOAuth: nativeOAuth}, nil
+}
+
+func writeAccessLoginUnauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": "Cloudflare Access authentication required"})
 }
 
 func RunHTTP(cfg *config.Config) error {
@@ -186,6 +235,7 @@ func RunHTTP(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	defer handler.Close()
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

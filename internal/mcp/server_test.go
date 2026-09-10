@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/heidi-dang/superfast-mcp/internal/access"
 	"github.com/heidi-dang/superfast-mcp/internal/config"
 )
 
@@ -39,12 +40,12 @@ func TestHTTPHandlerRequiresAuthenticationForMCP(t *testing.T) {
 }
 
 func TestHTTPHandlerPublishesOAuthDiscovery(t *testing.T) {
-	cfg := testConfig(t)
-	cfg.PublicURL = "https://superfast.example.com"
-	handler, err := NewHTTPHandler(cfg)
+	cfg := nativeHTTPTestConfig(t)
+	handler, err := newHTTPHandler(cfg, &fakeAccessVerifier{identity: access.Identity{Subject: "owner", Email: "owner@example.com"}})
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = handler.Close() })
 
 	metadataReq := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil)
 	metadataRec := httptest.NewRecorder()
@@ -67,9 +68,11 @@ func TestHTTPHandlerPublishesOAuthDiscovery(t *testing.T) {
 	authMetadataBody := authMetadataRec.Body.String()
 	for _, want := range []string{
 		`"issuer":"https://superfast.example.com"`,
-		`"authorization_endpoint":"https://superfast.example.com/authorize"`,
-		`"token_endpoint":"https://superfast.example.com/token"`,
-		`"registration_endpoint":"https://superfast.example.com/register"`,
+		`"authorization_endpoint":"https://superfast.example.com/oauth/authorize"`,
+		`"token_endpoint":"https://superfast.example.com/oauth/token"`,
+		`"registration_endpoint":"https://superfast.example.com/oauth/register"`,
+		`"revocation_endpoint":"https://superfast.example.com/oauth/revoke"`,
+		`"client_id_metadata_document_supported":true`,
 		`"S256"`,
 	} {
 		if !strings.Contains(authMetadataBody, want) {
