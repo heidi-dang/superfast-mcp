@@ -1,21 +1,11 @@
 # Replace mcp.example.com with the public hostname and point DNS at this host.
 # superfast-mcp should listen only on 127.0.0.1:8787 behind Caddy.
+# Proxy the complete origin surface: MCP plus OAuth discovery and endpoints.
 
 mcp.example.com {
 	encode zstd gzip
 
-	@superfast_mcp path /mcp /mcp/*
-	handle @superfast_mcp {
-		reverse_proxy 127.0.0.1:8787 {
-			flush_interval -1
-		}
-	}
-
-	handle /health {
-		reverse_proxy 127.0.0.1:8787
-	}
-
-	handle {
-		respond "superfast-mcp — use /mcp" 200
+	reverse_proxy 127.0.0.1:8787 {
+		flush_interval -1
 	}
 }
