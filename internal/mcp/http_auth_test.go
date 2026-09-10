@@ -113,6 +113,26 @@ func TestMCPAuthRejectsMissingCredentials(t *testing.T) {
 	}
 }
 
+func TestMCPAuthChallengeSuppressesNativeMetadataWhenAccessVerifierConfigured(t *testing.T) {
+	oauthServer, _ := nativeOAuthServerAndAccessToken(t)
+	handler := authenticateMCP(mcpAuthOptions{
+		NativeOAuth: oauthServer,
+		Access:      &fakeAccessVerifier{err: errors.New("invalid assertion")},
+	}, authSuccessHandler())
+	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	challenge := rec.Header().Get("WWW-Authenticate")
+	if strings.Contains(challenge, "resource_metadata=") {
+		t.Fatalf("challenge = %q, must not include native metadata when Access verifier exists", challenge)
+	}
+}
+
 func TestMCPAuthDoesNotTrustCfAssertionWithoutVerifier(t *testing.T) {
 	handler := authenticateMCP(mcpAuthOptions{StaticToken: "break-glass-token"}, authSuccessHandler())
 	req := httptest.NewRequest(http.MethodPost, "/mcp", nil)
