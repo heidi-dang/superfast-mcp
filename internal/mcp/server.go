@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -131,7 +133,10 @@ func newHTTPHandler(cfg *config.Config, injectedAccessVerifier access.Verifier) 
 	}
 	mcpHandler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return server
-	}, &mcp.StreamableHTTPOptions{Stateless: true})
+	}, &mcp.StreamableHTTPOptions{
+		Stateless:                  true,
+		DisableLocalhostProtection: isPublicLoopbackProxy(cfg),
+	})
 
 	limitedMCP := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Body != nil {
@@ -230,6 +235,36 @@ func writeAccessLoginUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusUnauthorized)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": "Cloudflare Access authentication required"})
+}
+
+// isPublicLoopbackProxy identifies the intentional reverse-proxy topology used
+// in production: the MCP process is reachable only on loopback, while an
+// authenticated public HTTPS endpoint forwards requests to it. The Go MCP
+// SDK's localhost DNS-rebinding guard rejects the proxy-preserved public Host
+// header in this topology, so it must be disabled at the SDK layer. MCP auth
+// remains enforced by authenticateMCP before the request reaches the SDK.
+func isPublicLoopbackProxy(cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	publicURL, err := url.Parse(strings.TrimSpace(cfg.PublicURL))
+	if err != nil || publicURL.Scheme != "https" || publicURL.Hostname() == "" || isLoopbackHostname(publicURL.Hostname()) {
+		return false
+	}
+	listenHost, _, err := net.SplitHostPort(strings.TrimSpace(cfg.HTTPAddr))
+	if err != nil {
+		return false
+	}
+	return isLoopbackHostname(listenHost)
+}
+
+func isLoopbackHostname(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func RunHTTP(cfg *config.Config) error {

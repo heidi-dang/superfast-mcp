@@ -1,11 +1,13 @@
 package mcpx
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,6 +148,28 @@ func TestHTTPHandlerAcceptsStaticBearerForMCP(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("static bearer MCP status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHTTPHandlerAllowsAuthenticatedPublicHostBehindLoopbackProxy(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.HTTPAddr = "127.0.0.1:8787"
+	cfg.PublicURL = "https://superfast.example.com"
+	handler, err := NewHTTPHandler(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := newToolsListRequest("/mcp")
+	req.Host = "superfast.example.com"
+	req.Header.Set("Authorization", "Bearer secret")
+	req = req.WithContext(context.WithValue(req.Context(), http.LocalAddrContextKey, &net.TCPAddr{
+		IP:   net.ParseIP("127.0.0.1"),
+		Port: 8787,
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("proxied authenticated MCP status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
