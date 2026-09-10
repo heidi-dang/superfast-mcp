@@ -164,7 +164,12 @@ func newHTTPHandler(cfg *config.Config, injectedAccessVerifier access.Verifier) 
 		if err != nil {
 			return nil, fmt.Errorf("configure native OAuth server: %w", err)
 		}
-		nativeOAuth.RegisterProtocolRoutes(mux)
+		// After Cloudflare Access Managed OAuth cutover, public discovery metadata must
+		// be owned by the edge challenge and not advertised by the origin by default.
+		if cfg.NativeOAuth.AdvertiseNativeMetadata {
+			nativeOAuth.RegisterMetadataRoutes(mux)
+		}
+		nativeOAuth.RegisterOperationalRoutes(mux)
 		mux.HandleFunc("/oauth/login", func(w http.ResponseWriter, r *http.Request) {
 			assertion := strings.TrimSpace(r.Header.Get("Cf-Access-Jwt-Assertion"))
 			if assertion == "" {

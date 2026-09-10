@@ -39,8 +39,50 @@ func TestHTTPHandlerRequiresAuthenticationForMCP(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerHidesNativeMetadataByDefault(t *testing.T) {
+	cfg := nativeHTTPTestConfig(t)
+	handler, err := newHTTPHandler(cfg, &fakeAccessVerifier{identity: access.Identity{Subject: "owner", Email: "owner@example.com"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = handler.Close() })
+
+	for _, path := range []string{
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/mcp",
+		"/.well-known/oauth-authorization-server",
+	} {
+		metadataReq := httptest.NewRequest(http.MethodGet, path, nil)
+		metadataRec := httptest.NewRecorder()
+		handler.ServeHTTP(metadataRec, metadataReq)
+		if metadataRec.Code != http.StatusNotFound {
+			t.Fatalf("path %s status = %d, want 404; body=%s", path, metadataRec.Code, metadataRec.Body.String())
+		}
+	}
+
+	registerReq := httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{"redirect_uris":["https://chatgpt.example/callback"],"client_name":"ChatGPT","grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none","application_type":"web"}`))
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := httptest.NewRecorder()
+	handler.ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d, want 201; body=%s", registerRec.Code, registerRec.Body.String())
+	}
+
+	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	mcpRec := httptest.NewRecorder()
+	handler.ServeHTTP(mcpRec, mcpReq)
+	if mcpRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated MCP status = %d, want 401", mcpRec.Code)
+	}
+	challenge := mcpRec.Header().Get("WWW-Authenticate")
+	if strings.Contains(challenge, "resource_metadata=") {
+		t.Fatalf("OAuth challenge must not expose resource metadata with Access verifier: %q", challenge)
+	}
+}
+
 func TestHTTPHandlerPublishesOAuthDiscovery(t *testing.T) {
 	cfg := nativeHTTPTestConfig(t)
+	cfg.NativeOAuth.AdvertiseNativeMetadata = true
 	handler, err := newHTTPHandler(cfg, &fakeAccessVerifier{identity: access.Identity{Subject: "owner", Email: "owner@example.com"}})
 	if err != nil {
 		t.Fatal(err)
@@ -78,17 +120,6 @@ func TestHTTPHandlerPublishesOAuthDiscovery(t *testing.T) {
 		if !strings.Contains(authMetadataBody, want) {
 			t.Fatalf("authorization metadata missing %s: %s", want, authMetadataBody)
 		}
-	}
-
-	mcpReq := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-	mcpRec := httptest.NewRecorder()
-	handler.ServeHTTP(mcpRec, mcpReq)
-	if mcpRec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated MCP status = %d, want 401", mcpRec.Code)
-	}
-	challenge := mcpRec.Header().Get("WWW-Authenticate")
-	if !strings.Contains(challenge, `resource_metadata="https://superfast.example.com/.well-known/oauth-protected-resource/mcp"`) {
-		t.Fatalf("OAuth challenge missing resource metadata URL: %q", challenge)
 	}
 }
 

@@ -201,9 +201,17 @@ func (s *Server) ResourceMetadataURL() string {
 }
 
 func (s *Server) RegisterProtocolRoutes(mux *http.ServeMux) {
+	s.RegisterMetadataRoutes(mux)
+	s.RegisterOperationalRoutes(mux)
+}
+
+func (s *Server) RegisterMetadataRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/.well-known/oauth-protected-resource", s.handleProtectedResourceMetadata)
 	mux.HandleFunc("/.well-known/oauth-protected-resource/mcp", s.handleProtectedResourceMetadata)
 	mux.HandleFunc("/.well-known/oauth-authorization-server", s.handleAuthorizationServerMetadata)
+}
+
+func (s *Server) RegisterOperationalRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/oauth/register", s.handleRegister)
 	mux.HandleFunc("/oauth/authorize", s.handleAuthorize)
 	mux.HandleFunc("/oauth/token", s.handleToken)

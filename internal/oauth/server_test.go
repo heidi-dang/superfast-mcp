@@ -137,6 +137,7 @@ func TestNativeOAuthMetadataMatchesAWSParity(t *testing.T) {
 			t.Fatalf("metadata[%s]=%v want %q", key, metadata[key], want)
 		}
 	}
+
 	if metadata["client_id_metadata_document_supported"] != true {
 		t.Fatalf("CIMD support=%v", metadata["client_id_metadata_document_supported"])
 	}
@@ -155,6 +156,31 @@ func TestNativeOAuthMetadataMatchesAWSParity(t *testing.T) {
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"authorization_servers":["https://superfast.example.com"]`) || !strings.Contains(rec.Body.String(), `"resource":"https://superfast.example.com/mcp"`) {
 			t.Fatalf("protected metadata path=%s status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestRouteRegistrationCanSplitMetadataAndOperationalEndpoints(t *testing.T) {
+	server := newTestNativeServer(t)
+
+	metadataMux := http.NewServeMux()
+	server.RegisterMetadataRoutes(metadataMux)
+	metadataRec := httptest.NewRecorder()
+	metadataMux.ServeHTTP(metadataRec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil))
+	if metadataRec.Code != http.StatusOK {
+		t.Fatalf("metadata endpoint status=%d body=%s", metadataRec.Code, metadataRec.Body.String())
+	}
+	registerRec := httptest.NewRecorder()
+	metadataMux.ServeHTTP(registerRec, httptest.NewRequest(http.MethodPost, "/oauth/register", strings.NewReader(`{}`)))
+	if registerRec.Code != http.StatusNotFound {
+		t.Fatalf("metadata-only mux should not expose /oauth/register, got %d", registerRec.Code)
+	}
+
+	operationalMux := http.NewServeMux()
+	server.RegisterOperationalRoutes(operationalMux)
+	protectedRec := httptest.NewRecorder()
+	operationalMux.ServeHTTP(protectedRec, httptest.NewRequest(http.MethodGet, "/.well-known/oauth-protected-resource/mcp", nil))
+	if protectedRec.Code != http.StatusNotFound {
+		t.Fatalf("operational-only mux should not expose discovery metadata, got %d", protectedRec.Code)
 	}
 }
 

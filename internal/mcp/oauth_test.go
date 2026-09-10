@@ -22,7 +22,7 @@ func nativeHTTPTestConfig(t *testing.T) *config.Config {
 	return &config.Config{
 		Roots: []string{t.TempDir()}, Version: "test", AuthToken: "break-glass", PublicURL: issuer,
 		CloudflareAccess: &config.CloudflareAccessConfig{Issuer: "https://team.cloudflareaccess.com", Audience: "app-aud", AllowedEmail: "owner@example.com", JWKSURL: "https://team.cloudflareaccess.com/cdn-cgi/access/certs", Resource: issuer + "/mcp"},
-		NativeOAuth:      &config.NativeOAuthConfig{Issuer: issuer, Resource: issuer + "/mcp", Scopes: []string{"mcp"}, Secret: strings.Repeat("n", 48), StateDB: filepath.Join(t.TempDir(), "oauth.db")},
+		NativeOAuth:      &config.NativeOAuthConfig{Issuer: issuer, Resource: issuer + "/mcp", Scopes: []string{"mcp"}, Secret: strings.Repeat("n", 48), StateDB: filepath.Join(t.TempDir(), "oauth.db"), AdvertiseNativeMetadata: false},
 	}
 }
 
