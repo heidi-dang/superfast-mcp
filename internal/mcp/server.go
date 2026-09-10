@@ -172,6 +172,9 @@ func NewHTTPHandler(cfg *config.Config) (http.Handler, error) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		fmt.Fprintf(w, "superfast-mcp %s\nMCP endpoint: /mcp\nHealth: /health\n", cfg.Version)
 	})
+	if cfg.LogJSON {
+		return requestTelemetry(mux), nil
+	}
 	return mux, nil
 }
 
