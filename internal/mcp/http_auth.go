@@ -38,8 +38,13 @@ func authenticateMCP(options mcpAuthOptions, next http.Handler) http.Handler {
 			}
 		}
 
+		// When Cloudflare Access is the primary public path, do not advertise
+		// native resource_metadata here — the CF edge owns the externally
+		// observed WWW-Authenticate challenge pointing at
+		// /.well-known/cloudflare-access-protected-resource/mcp.
+		// Only emit native metadata when running pure-native (no Access verifier).
 		challenge := `Bearer realm="superfast-mcp"`
-		if options.NativeOAuth != nil {
+		if options.NativeOAuth != nil && options.Access == nil {
 			challenge = fmt.Sprintf(`Bearer realm="superfast-mcp", resource_metadata=%q, scope="mcp"`, options.NativeOAuth.ResourceMetadataURL())
 		}
 		w.Header().Set("WWW-Authenticate", challenge)
